@@ -43,6 +43,46 @@ services:
     networks:
       - lm_network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+  # Local STT Engine (Whisper)
+  stt:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: lm_stt
+    restart: always
+    environment:
+      - ASR_MODEL=base
+      - ASR_ENGINE=openai_whisper
+    volumes:
+      - ai_models:/root/.cache/whisper
+    ports:
+      - "9000:9000"
+    networks:
+      - lm_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+
+  # Local LLM Engine (Ollama/vLLM placeholder)
+  llm:
+    image: ollama/ollama:latest
+    container_name: lm_llm
+    restart: always
+    volumes:
+      - ai_models:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - lm_network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
   # Nginx (선택 사항 - 프로덕션용)
   # nginx:
   #   image: nginx:alpine
@@ -61,6 +101,8 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  ai_models:
     driver: local
 
 networks:

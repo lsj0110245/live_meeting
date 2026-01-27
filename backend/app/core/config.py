@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 2000
     LLM_TEMPERATURE: float = 0.3
     
+    # Local AI URLs (On-Premise)
+    LOCAL_STT_URL: str = "http://stt:9000"
+    LOCAL_LLM_URL: str = "http://llm:11434"
+    
     # JWT 인증 설정
     SECRET_KEY: str
     ALGORITHM: str = "HS256"

@@ -4,6 +4,8 @@
 
 ```
 live_meeting/
+├── scripts/                          # 유틸리티 스크립트
+│   └── download_models.sh            # AI 모델 다운로드 스크립트
 ├── backend/                          # FastAPI 백엔드
 │   ├── app/
 │   │   ├── __init__.py
@@ -109,7 +111,13 @@ live_meeting/
 ├── .gitignore
 ├── README.md
 └── PROJECT_STRUCTURE.md              # 이 파일
-```
+
+## 🐳 Docker 컨테이너 구조
+
+- **backend**: FastAPI 애플리케이션 (8000포트)
+- **db**: PostgreSQL + pgvector (5432포트)
+- **stt**: Whisper ASR Webservice (9000포트, GPU)
+- **llm**: Ollama/vLLM (11434포트, GPU)
 
 ## 🗄️ 데이터베이스 스키마
 
