@@ -24,7 +24,14 @@ LiveMeeting은 회의 중 실시간 녹음 또는 녹음 파일 업로드를 통
 ✅ **다양한 내보내기 형식**
 - CSV 형식
 - XLSX (Excel) 형식
+- CSV 형식
+- XLSX (Excel) 형식
 - 사용자 지정 저장 경로
+
+✅ **완벽한 온프리미스 보안**
+- 외부 클라우드 전송 없음
+- 모든 데이터 로컬 서버 저장
+- 인터넷 연결 없이 독립 망 운영 가능
 
 ## 🛠️ 기술 스택
 
@@ -33,8 +40,8 @@ LiveMeeting은 회의 중 실시간 녹음 또는 녹음 파일 업로드를 통
 - **PostgreSQL**: 관계형 데이터베이스
 - **SQLAlchemy**: ORM
 - **Alembic**: 데이터베이스 마이그레이션
-- **AWS Transcribe (Nova-2)**: STT 엔진
-- **OpenAI/Anthropic**: LLM 회의록 생성
+- **Local Nova-2 / Whisper**: 온프리미스 STT 엔진 (Docker 내장)
+- **Local LLM (Llama 3 / Mistral)**: 온프리미스 회의록 생성 (GPU 서버)
 
 ### Frontend
 - **HTML/CSS/JavaScript**: 클라이언트 UI
@@ -68,9 +75,9 @@ cp .env.example .env
 ```
 
 필수 환경 변수:
-- `AWS_ACCESS_KEY_ID`: AWS 액세스 키
-- `AWS_SECRET_ACCESS_KEY`: AWS 시크릿 키
-- `OPENAI_API_KEY` 또는 `ANTHROPIC_API_KEY`: LLM API 키
+- `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (선택 사항: 클라우드 백업용)
+- `OPENAI_API_KEY` (선택 사항: 하이브리드 모드 시)
+- **Local AI 모델 경로는 `docker-compose.yml`에서 설정**
 - `POSTGRES_USER`, `POSTGRES_PASSWORD`: DB 자격 증명
 
 ### 2. Docker Compose 실행

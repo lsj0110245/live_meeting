@@ -25,7 +25,7 @@ from app.db.base import Base
 
 target_metadata = Base.metadata
 # Import models so Alembic can detect them
-from app.models import user
+from app.models import user, meeting, transcript, summary
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

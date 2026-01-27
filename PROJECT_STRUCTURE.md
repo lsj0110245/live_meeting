@@ -44,8 +44,8 @@ live_meeting/
 │   │   │
 │   │   ├── services/                 # 비즈니스 로직
 │   │   │   ├── __init__.py
-│   │   │   ├── stt_service.py        # Nova-2 STT 서비스
-│   │   │   ├── llm_service.py        # LLM 요약 서비스
+│   │   │   ├── stt_service.py        # Local Nova-2 / Whisper STT 서비스
+│   │   │   ├── llm_service.py        # Local LLM (Llama 3) 요약 서비스
 │   │   │   ├── export_service.py     # CSV/XLSX 생성
 │   │   │   └── storage_service.py    # 파일 저장 (S3/로컬)
 │   │   │
@@ -178,11 +178,11 @@ CREATE TABLE summaries (
 - **SQLAlchemy**: ORM
 - **Alembic**: DB 마이그레이션
 - **PostgreSQL**: 데이터베이스
-- **boto3**: AWS SDK (Nova-2 STT)
+- **Local AI Engine**: Nova-2 / Whisper (STT) 및 Llama 3 (LLM) 직접 구동
 - **websockets**: 실시간 통신
 - **python-jose**: JWT 인증
 - **passlib**: 비밀번호 해싱
-- **openai/anthropic**: LLM API
+- **transformers / vllm**: 로컬 LLM 추론
 - **openpyxl**: XLSX 생성
 - **pandas**: CSV 생성
 
@@ -211,7 +211,7 @@ WebSocket 연결 (/ws/recording)
     ↓
 오디오 스트림 → 서버 전송 (청크 단위)
     ↓
-Nova-2 STT 변환
+Local STT 엔진 변환 (Docker 내부 처리)
     ↓
 텍스트 축적 (DB 저장)
     ↓
@@ -230,7 +230,7 @@ Nova-2 STT 변환
     ↓
 서버에 파일 저장
     ↓
-Nova-2 STT 처리 (비동기)
+Local STT 처리 (비동기 큐)
     ↓
 전사 텍스트 생성
     ↓

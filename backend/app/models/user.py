@@ -9,5 +9,5 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
-    # Example relationship placeholder
-    # meetings = relationship("Meeting", back_populates="owner")
+    # Relationships
+    meetings = relationship("Meeting", back_populates="owner", cascade="all, delete-orphan")
