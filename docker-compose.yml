@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
+  # PostgreSQL 데이터베이스
   db:
     image: pgvector/pgvector:pg18
     container_name: lm_postgres
@@ -22,7 +22,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # FastAPI Backend
+  # FastAPI 백엔드
   backend:
     build:
       context: ./backend
@@ -43,7 +43,7 @@ services:
     networks:
       - lm_network
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-  # Nginx (Optional - for production)
+  # Nginx (선택 사항 - 프로덕션용)
   # nginx:
   #   image: nginx:alpine
   #   container_name: lm_nginx

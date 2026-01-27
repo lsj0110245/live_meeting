@@ -3,6 +3,11 @@ from sqlalchemy.orm import relationship
 from app.db.base import Base
 
 class Transcript(Base):
+    """
+    전사(Transcript) 모델
+    
+    회의의 음성을 텍스트로 변환한 세그먼트 데이터를 저장합니다.
+    """
     __tablename__ = "transcripts"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -13,5 +18,5 @@ class Transcript(Base):
     text = Column(Text, nullable=False)
     speaker = Column(String, nullable=True)
     
-    # Relationships
+    # 관계 정의
     meeting = relationship("Meeting", back_populates="transcripts")
