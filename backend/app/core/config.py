@@ -17,16 +17,19 @@ class Settings(BaseSettings):
     POSTGRES_DB: str
     DATABASE_URL: str
     
-    # AWS 설정 (Nova-2 STT)
-    AWS_ACCESS_KEY_ID: str
-    AWS_SECRET_ACCESS_KEY: str
+    # Deepgram 설정 (Nova-2 Realtime)
+    DEEPGRAM_API_KEY: str | None = None
+    
+    # AWS 설정 (Legacy - 제거 가능)
+    AWS_ACCESS_KEY_ID: str | None = None
+    AWS_SECRET_ACCESS_KEY: str | None = None
     AWS_REGION: str = "us-east-1"
     
     # LLM API 설정
     OPENAI_API_KEY: str | None = None
     ANTHROPIC_API_KEY: str | None = None
-    LLM_MODEL: str = "gpt-4"
-    LLM_MAX_TOKENS: int = 2000
+    LLM_MODEL: str = "llama3"  # Default to Local Llama 3
+    LLM_MAX_TOKENS: int = 4096
     LLM_MAX_TOKENS: int = 2000
     LLM_TEMPERATURE: float = 0.3
     

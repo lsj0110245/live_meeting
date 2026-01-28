@@ -1,5 +1,4 @@
-from typing import Any, List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.api import deps
 from app.db.session import get_db
@@ -8,6 +7,44 @@ from app.models.transcript import Transcript
 from app.models.summary import Summary
 from app.models.user import User
 from app.schemas.meeting import Meeting as MeetingSchema, MeetingCreate, MeetingUpdate
+from app.services.llm_service import llm_service
+import asyncio
+
+router = APIRouter()
+
+async def process_meeting_summary(meeting_id: int, db: Session):
+    """
+    백그라운드 작업: 회의록 생성 및 저장
+    """
+    try:
+        # 1. 전사 데이터 조회
+        meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+        transcripts = db.query(Transcript).filter(Transcript.meeting_id == meeting_id).order_by(Transcript.start_time).all()
+        
+        if not transcripts:
+            print(f"전사 데이터가 없습니다. 회의 ID: {meeting_id}")
+            return
+
+        # 전사 텍스트 합치기
+        full_text = "\n".join([f"{t.speaker}: {t.text}" for t in transcripts])
+        
+        # 2. LLM 요약 생성
+        print(f"회의록 생성 중... 회의 ID: {meeting_id}")
+        summary_text = await llm_service.generate_summary(meeting.title, full_text)
+        
+        # 3. 요약 결과 저장 (Summary)
+        summary = Summary(
+            meeting_id=meeting_id,
+            summary_type="final",
+            content=summary_text,
+            # key_points, action_items 등은 추후 JSON 파싱 구현 시 추가
+        )
+        db.add(summary)
+        db.commit()
+        print(f"회의록 생성 완료. 회의 ID: {meeting_id}")
+        
+    except Exception as e:
+        print(f"회의록 생성 실패. 회의 ID: {meeting_id}, 오류: {str(e)}")
 
 router = APIRouter()
 
@@ -72,6 +109,7 @@ def create_meeting(
 @router.post("/{meeting_id}/summarize")
 def generate_summary(
     meeting_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
@@ -85,7 +123,7 @@ def generate_summary(
     if meeting.owner_id != current_user.id:
         raise HTTPException(status_code=400, detail="권한이 없습니다.")
         
-    # TODO: Background Task로 LLM 서비스 호출 (Llama 3)
-    # background_tasks.add_task(llm_service.generate_summary, meeting.id)
+    # Background Task로 LLM 서비스 호출 (Llama 3)
+    background_tasks.add_task(process_meeting_summary, meeting.id, db)
     
-    return {"message": "회의록 생성이 요청되었습니다."}
+    return {"message": "회의록 생성이 요청되었습니다. 잠시 후 확인해주세요."}
