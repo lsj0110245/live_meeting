@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}로그인 - LiveMeeting{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="card auth-card">
+        <h2>로그인</h2>
+        <p class="subtitle">LiveMeeting 서비스에 오신 것을 환영합니다.</p>
+
+        <form id="login-form">
+            <div class="form-group">
+                <label>이메일</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-envelope"></i>
+                    <input type="email" id="email" placeholder="user@example.com" required>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>비밀번호</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-lock"></i>
+                    <input type="password" id="password" placeholder="비밀번호 입력" required>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-full">로그인</button>
+        </form>
+
+        <div class="auth-footer">
+            계정이 없으신가요? <a href="/register">회원가입</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/auth.js"></script>
+{% endblock %}

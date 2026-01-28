@@ -8,6 +8,7 @@ from app.models.summary import Summary
 from app.models.user import User
 from app.schemas.meeting import Meeting as MeetingSchema, MeetingCreate, MeetingUpdate
 from app.services.llm_service import llm_service
+from typing import Any, List
 import asyncio
 
 router = APIRouter()

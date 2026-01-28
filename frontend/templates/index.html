@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}대시보드 - LiveMeeting{% endblock %}
+
+{% block content %}
+<!-- 로그인 전 랜딩 페이지 -->
+<div id="landing-view" class="landing-container" style="text-align: center; padding: 50px 20px;">
+    <h1 style="font-size: 2.5rem; margin-bottom: 20px;">LiveMeeting에 오신 것을 환영합니다</h1>
+    <p style="font-size: 1.2rem; color: var(--text-secondary); margin-bottom: 40px;">
+        AI 기반 실시간 회의록 자동 생성 및 요약 서비스입니다.<br>
+        회의를 녹음하거나 파일을 업로드하여 스마트한 회의록을 경험해보세요.
+    </p>
+    <div class="landing-actions" style="display: flex; gap: 20px; justify-content: center;">
+        <a href="/login" class="btn btn-primary" style="padding: 15px 40px; font-size: 1.1rem;">로그인</a>
+        <a href="/register" class="btn btn-outline" style="padding: 15px 40px; font-size: 1.1rem;">회원가입</a>
+    </div>
+</div>
+
+<!-- 로그인 후 대시보드 (기존 내용) -->
+<div id="dashboard-view" style="display: none;">
+    <div class="dashboard-header">
+        <h1><i class="fa-solid fa-shapes"></i> 내 회의 목록</h1>
+        <div class="header-actions">
+            <a href="/recording" class="btn"><i class="fa-solid fa-plus"></i> 새 회의 시작</a>
+            <button id="btn-upload" class="btn btn-outline"><i class="fa-solid fa-upload"></i> 파일 업로드</button>
+            <!-- 숨겨진 파일 입력 -->
+            <input type="file" id="file-input" accept="audio/*,video/*" style="display: none;">
+        </div>
+    </div>
+
+    <div class="meeting-list" id="meeting-list">
+        <!-- 로딩 중 -->
+        <div class="loading-state">
+            <i class="fa-solid fa-circle-notch fa-spin"></i>
+            <p>회의 목록을 불러오는 중...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}

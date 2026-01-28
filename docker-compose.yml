@@ -33,6 +33,7 @@ services:
       - .env
     volumes:
       - ./backend:/app
+      - ./frontend:/app/frontend
       - ./media:/app/media
       - ./exports:/app/exports
     ports:

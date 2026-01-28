@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}LiveMeeting - AI 회의록 시스템{% endblock %}</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+
+    <nav class="navbar">
+        <a href="/" class="logo">
+            <i class="fa-solid fa-microphone-lines"></i>
+            LiveMeeting
+        </a>
+        <div class="nav-links" id="nav-auth">
+            <a href="/login" class="nav-item" id="link-login">로그인</a>
+            <a href="/register" class="btn" id="link-register">무료 시작하기</a>
+        </div>
+        <div class="nav-links hidden" id="nav-user">
+            <a href="/" class="nav-item">대시보드</a>
+            <a href="#" class="nav-item" onclick="logout()">로그아웃</a>
+            <div class="profile-icon"><i class="fa-solid fa-user-circle"></i></div>
+        </div>
+    </nav>
+
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Common JS -->
+    <script src="/static/js/common.js"></script>
+
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>

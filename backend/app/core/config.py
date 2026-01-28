@@ -30,7 +30,6 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str | None = None
     LLM_MODEL: str = "llama3"  # Default to Local Llama 3
     LLM_MAX_TOKENS: int = 4096
-    LLM_MAX_TOKENS: int = 2000
     LLM_TEMPERATURE: float = 0.3
     
     # LangSmith (Monitoring)
@@ -49,7 +48,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     
     # CORS 설정
-    CORS_ORIGINS: str = "http://localhost:8000,http://localhost:3000"
+    CORS_ORIGINS: str = "http://localhost:8000,http://localhost:3000,http://localhost:8001"
     
     # 파일 업로드 설정
     MAX_FILE_SIZE_MB: int = 500
