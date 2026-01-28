@@ -50,6 +50,28 @@ async function handleRegister(e) {
     const password = document.getElementById('password').value;
     const passwordConfirm = document.getElementById('password-confirm').value;
 
+    // 유효성 검사 (사용자 요청 사항)
+
+    // 1. 이름은 10자 이내
+    if (username.length > 10) {
+        alert('이름은 10자 이내로 입력해주세요.');
+        return;
+    }
+
+    // 2. 비밀번호는 4자리 이상
+    if (password.length < 4) {
+        alert('비밀번호는 4자리 이상으로 설정해주세요.');
+        return;
+    }
+
+    // 3. 이메일 형식 (@email.com 형식으로 양식 꼭 맞추고 - 일반적인 이메일 형식 체크)
+    // "형식"이라는 말이 표준 포맷을 의미하는 것으로 해석되나, 혹시 모를 오해를 방지하기 위해 표준 정규식 사용
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        alert('올바른 이메일 형식을 입력해주세요. (예: user@email.com)');
+        return;
+    }
+
     if (password !== passwordConfirm) {
         alert('비밀번호가 일치하지 않습니다.');
         return;

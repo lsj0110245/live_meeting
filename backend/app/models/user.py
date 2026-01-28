@@ -12,6 +12,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
+    username = Column(String, index=True) # 사용자 이름 추가
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
     # 관계 정의

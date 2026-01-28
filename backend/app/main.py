@@ -39,6 +39,16 @@ if not (frontend_dir / "static").exists():
 static_dir = frontend_dir / "static"
 templates_dir = frontend_dir / "templates"
 
+@app.on_event("startup")
+async def startup_event():
+    print(f"DEBUG: DATABASE_URL={settings.DATABASE_URL}")
+    
+    # 템플릿 디렉토리 확인
+    if not templates_dir.exists():
+        print(f"WARNING: Templates directory not found at {templates_dir}")
+    if not static_dir.exists():
+        print(f"WARNING: Static directory not found at {static_dir}")
+
 # 디렉토리가 없으면 생성 (Docker 마운트 이슈 방지용 안전장치)
 if not static_dir.exists():
     print(f"WARNING: Static directory {static_dir} not found. Creating it.")

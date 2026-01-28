@@ -1,15 +1,15 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 # 공통 속성 (Base)
 class UserBase(BaseModel):
     email: EmailStr
-    username: str | None = None
+    username: str | None = Field(None, max_length=10)
     is_active: bool | None = True
 
 # 회원가입 시 받을 데이터 (Create)
 class UserCreate(UserBase):
-    password: str
+    password: str = Field(..., min_length=4)
 
 # 업데이트 시 받을 데이터 (Update)
 class UserUpdate(BaseModel):
