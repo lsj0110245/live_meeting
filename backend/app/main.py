@@ -58,9 +58,16 @@ async def test_database():
         }
 
 
-# API 라우터 등록 (나중에 추가)
-# from app.api.endpoints import auth, recording, upload, meeting, export
-# app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+# API 라우터 등록
+from app.api.endpoints import auth, recording, upload, meeting, export
+app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(recording.router, prefix="/api/recording", tags=["Recording"])
+app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])
+app.include_router(meeting.router, prefix="/api/meeting", tags=["Meeting"])
+app.include_router(export.router, prefix="/api/export", tags=["Export"])
+
+# 나중에 추가될 라우터들
+# from app.api.endpoints import recording, upload, meeting, export
 # app.include_router(recording.router, prefix="/api/recording", tags=["Recording"])
 # app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])
 # app.include_router(meeting.router, prefix="/api/meeting", tags=["Meeting"])

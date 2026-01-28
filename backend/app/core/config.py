@@ -27,7 +27,14 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str | None = None
     LLM_MODEL: str = "gpt-4"
     LLM_MAX_TOKENS: int = 2000
+    LLM_MAX_TOKENS: int = 2000
     LLM_TEMPERATURE: float = 0.3
+    
+    # LangSmith (Monitoring)
+    LANGCHAIN_TRACING_V2: str = "false"
+    LANGCHAIN_ENDPOINT: str = "https://api.smith.langchain.com"
+    LANGCHAIN_API_KEY: str | None = None
+    LANGCHAIN_PROJECT: str = "LiveMeeting"
     
     # Local AI URLs (On-Premise)
     LOCAL_STT_URL: str = "http://stt:9000"
