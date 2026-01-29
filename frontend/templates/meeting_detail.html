@@ -54,5 +54,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/meeting.js"></script>
+<script src="/static/js/meeting.js?v={{ range(1, 10000) | random }}"></script>
 {% endblock %}

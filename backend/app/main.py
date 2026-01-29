@@ -69,8 +69,8 @@ if not static_dir.exists():
     # 에러를 방지하기 위해 빈 디렉토리라도 생성하거나 예외 처리 필요할 수 있음
     # 여기서는 진행하지만 실행 시 에러 발생 가능성 있음
 
+app.mount("/media", StaticFiles(directory="/app/media"), name="media") # 미디어 파일 서빙 (별도 경로)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-app.mount("/static/media", StaticFiles(directory="media"), name="media") # 미디어 파일 서빙
 templates = Jinja2Templates(directory=str(templates_dir))
 
 # CORS 설정

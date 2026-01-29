@@ -115,6 +115,9 @@ function renderMeetings(meetings) {
 
         return `
             <div class="meeting-card" onclick="location.href='/meeting/${meeting.id}'">
+                <button class="btn-delete" onclick="deleteMeeting(event, ${meeting.id})" title="회의 삭제">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
                 <div class="meeting-title">${title}</div>
                 <div class="meeting-date"><i class="fa-regular fa-clock"></i> ${date}</div>
                 <span class="meeting-status ${statusClass}">
@@ -123,4 +126,33 @@ function renderMeetings(meetings) {
             </div>
         `;
     }).join('');
+}
+
+async function deleteMeeting(event, meetingId) {
+    event.stopPropagation(); // 카드 클릭 이벤트 전파 방지
+
+    if (!confirm("정말 이 회의를 삭제하시겠습니까?\n삭제된 데이터는 복구할 수 없습니다.")) {
+        return;
+    }
+
+    try {
+        const token = localStorage.getItem('access_token');
+        const response = await fetch(`/api/meeting/${meetingId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (response.ok) {
+            // alert('회의가 삭제되었습니다.'); // 너무 방해될 수 있으므로 생략 가능
+            await loadMeetings(); // 목록 갱신
+        } else {
+            const error = await response.json();
+            alert('삭제 실패: ' + (error.detail || '알 수 없는 오류'));
+        }
+    } catch (err) {
+        console.error(err);
+        alert('삭제 중 오류가 발생했습니다.');
+    }
 }

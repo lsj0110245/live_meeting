@@ -39,5 +39,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/dashboard.js"></script>
+<script src="/static/js/dashboard.js?v={{ range(1, 10000) | random }}"></script>
 {% endblock %}
