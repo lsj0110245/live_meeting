@@ -16,6 +16,8 @@ class Meeting(Base):
     description = Column(Text, nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    audio_file_path = Column(String, nullable=True) # 오디오 파일 경로 추가
+    status = Column(String, default="pending") # 회의 상태 (pending, processing, completed)
     
     # 관계 정의
     owner = relationship("User", back_populates="meetings")

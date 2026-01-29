@@ -29,7 +29,8 @@ async def process_audio_file(meeting_id: int, file_path: str, db: Session):
             start_time=0.0,
             end_time=0.0, # 전체 길이는 오디오 메타데이터 필요
             text=text,
-            speaker="Speaker"
+            speaker="Speaker",
+            segment_index=0 # 통짜 텍스트이므로 0번 세그먼트로 지정
         )
         db.add(transcript)
         

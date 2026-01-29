@@ -20,7 +20,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
+ffmpeg-7.1.1-full_build-shared/
 # Virtual Environment
 venv/
 env/

@@ -50,7 +50,7 @@ services:
     container_name: lm_stt
     restart: always
     environment:
-      - ASR_MODEL=large-v3
+      - ASR_MODEL=medium
       - ASR_ENGINE=openai_whisper
     volumes:
       - ai_models:/root/.cache/whisper
