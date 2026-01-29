@@ -89,20 +89,13 @@ async function loadMeetingDetails() {
         }
 
         // 요약본 로딩 로직
-        if (meeting.summaries && meeting.summaries.length > 0) {
-            // 가장 최근 요약 사용 (또는 리스트로 보여주기)
-            const latestSummary = meeting.summaries[meeting.summaries.length - 1];
+        if (meeting.summary) {
             const summaryContent = document.getElementById('summary-content');
-
-            // 마크다운 렌더링 (간단히 텍스트로 처리하거나 marked 라이브러리 필요)
-            // 여기서는 줄바꿈 처리만 간단히 구현
-            let htmlContent = latestSummary.content.replace(/\n/g, '<br>');
-
-            summaryContent.innerHTML = htmlContent;
-        } else if (meeting.summary) {
-            // 단일 객체로 올 경우 (Schema 구조에 따라 다름)
-            const summaryContent = document.getElementById('summary-content');
-            summaryContent.innerText = meeting.summary.content;
+            if (summaryContent) {
+                // 줄바꿈 처리
+                let htmlContent = meeting.summary.content.replace(/\n/g, '<br>');
+                summaryContent.innerHTML = htmlContent;
+            }
         }
 
     } catch (err) {
