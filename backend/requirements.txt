@@ -26,6 +26,11 @@ langchain>=0.1.0
 langchain-community>=0.0.1
 langchain-core>=0.1.0
 
+# Whisper STT (직접 구현)
+transformers>=4.35.0
+torch>=2.0.0
+accelerate>=0.24.0
+
 # WebSocket (실시간 통신)
 websockets==12.0
 

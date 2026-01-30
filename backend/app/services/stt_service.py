@@ -1,7 +1,6 @@
-import httpx
 import os
-import json
 from app.core.config import settings
+from app.services.whisper_stt_service import whisper_stt_service
 
 class STTService:
     def __init__(self):
@@ -10,32 +9,15 @@ class STTService:
 
     async def transcribe_file_local(self, file_path: str, language: str = "ko") -> str:
         """
-        로컬 Whisper 컨테이너를 사용하여 파일 전사
+        Whisper 모델을 직접 사용하여 파일 전사 (GPU 최적화)
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Audio file not found: {file_path}")
 
         try:
-            async with httpx.AsyncClient(timeout=300.0) as client: # 녹음 파일이 길 수 있으므로 타임아웃 길게 설정
-                with open(file_path, "rb") as f:
-                    files = {"audio_file": (os.path.basename(file_path), f, "audio/mpeg")}
-                    # Whisper Webservice API: /asr?task=transcribe&language=ko
-                    params = {
-                        "task": "transcribe",
-                        "language": language,
-                        "output": "json"
-                    }
-                    
-                    response = await client.post(
-                        self.whisper_url,
-                        files=files,
-                        params=params
-                    )
-                    response.raise_for_status()
-                    
-                    result = response.json()
-                    # Whisper 결과 포맷에 따라 'text' 필드 반환
-                    return result.get("text", "")
+            # 새로운 WhisperSTTService 사용
+            transcript_text = await whisper_stt_service.transcribe_file(file_path, language)
+            return transcript_text
                     
         except Exception as e:
             print(f"Local STT Error: {str(e)}")

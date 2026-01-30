@@ -59,11 +59,20 @@ class LLMService:
             if not transcript_text.strip():
                 return "전사 데이터가 없어 요약할 수 없습니다."
                 
+            print("LLM 회의록 생성 시작...")
+            
             # LangChain 비동기 호출
             response = await self.chain.ainvoke({
                 "title": title,
                 "transcript_text": transcript_text
             })
+            
+            print("LLM 회의록 생성 완료")
+            
+            # GPU 메모리 정리 (Ollama는 KEEP_ALIVE=0으로 자동 해제되지만 명시적으로 확인)
+            # Ollama는 별도 프로세스이므로 Python에서 직접 GPU 캐시 클리어는 불필요
+            # 하지만 향후 다른 LLM 사용 시를 대비해 로그 남김
+            print("LLM 작업 완료, GPU 메모리는 Ollama가 자동 관리 (KEEP_ALIVE=0)")
             
             return response
             
