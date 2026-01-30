@@ -14,10 +14,15 @@ import asyncio
 
 router = APIRouter()
 
-async def process_audio_file(meeting_id: int, file_path: str, db: Session):
+from app.db.session import SessionLocal
+
+from app.services.meeting_tasks import process_meeting_summary
+
+async def process_audio_file(meeting_id: int, file_path: str):
     """
     백그라운드 작업: 오디오 파일 전사 및 결과 저장
     """
+    db = SessionLocal()
     try:
         # 1. STT 전사 (Local Whisper)
         text = await stt_service.transcribe_file_local(file_path)
@@ -41,10 +46,16 @@ async def process_audio_file(meeting_id: int, file_path: str, db: Session):
             
         db.commit()
         print(f"Meeting {meeting_id} transcription completed.")
+
+        # 4. (추가) 자동 요약 생성
+        # 전사 완료 후 바로 요약 생성 작업 시작
+        await process_meeting_summary(meeting_id)
         
     except Exception as e:
         print(f"Transcription failed for meeting {meeting_id}: {str(e)}")
         # 에러 상태 업데이트 로직 추가 가능
+    finally:
+        db.close()
 
 router = APIRouter()
 
@@ -104,7 +115,7 @@ async def upload_file(
     db.refresh(meeting)
     
     # 4. Background Task로 STT 서비스 호출 (Whisper)
-    background_tasks.add_task(process_audio_file, meeting.id, file_path, db)
+    background_tasks.add_task(process_audio_file, meeting.id, file_path)
     
     return {
         "meeting_id": meeting.id,

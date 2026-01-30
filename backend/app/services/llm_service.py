@@ -44,7 +44,8 @@ class LLMService:
             [전사 텍스트]:
             {transcript_text}
             
-            위 내용을 바탕으로 회의록을 작성해주세요.
+            위 내용을 바탕으로 회의록을 작성해주세요. 
+            **반드시 한국어로 작성해주세요.** (Must write in Korean)
             """)
         ])
         

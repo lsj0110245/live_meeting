@@ -95,6 +95,8 @@ async function loadMeetings() {
 function renderMeetings(meetings) {
     const listEl = document.getElementById('meeting-list');
 
+
+
     if (meetings.length === 0) {
         listEl.innerHTML = `
             <div class="empty-state">
@@ -118,7 +120,12 @@ function renderMeetings(meetings) {
                 <button class="btn-delete" onclick="deleteMeeting(event, ${meeting.id})" title="회의 삭제">
                     <i class="fa-solid fa-trash"></i>
                 </button>
-                <div class="meeting-title">${title}</div>
+                <div class="meeting-title" id="title-container-${meeting.id}" style="display:flex; align-items:center; gap:8px; min-height: 30px;">
+                    <span id="title-text-${meeting.id}">${title}</span>
+                    <button class="btn-edit" id="btn-edit-${meeting.id}" onclick="enableEditMode(event, ${meeting.id})" title="이름 변경" style="background:none; border:none; cursor: pointer; color: #888; font-size: 0.9rem;">
+                        <i class="fa-solid fa-pen"></i>
+                    </button>
+                </div>
                 <div class="meeting-date"><i class="fa-regular fa-clock"></i> ${date}</div>
                 <span class="meeting-status ${statusClass}">
                     ${(meeting.status || 'unknown').toUpperCase()}
@@ -128,10 +135,121 @@ function renderMeetings(meetings) {
     }).join('');
 }
 
+function enableEditMode(event, meetingId) {
+    event.stopPropagation();
+    const container = document.getElementById(`title-container-${meetingId}`);
+    const textSpan = document.getElementById(`title-text-${meetingId}`);
+    const editBtn = document.getElementById(`btn-edit-${meetingId}`);
+
+    if (!container || !textSpan || !editBtn) return;
+
+    const currentTitle = textSpan.innerText;
+
+    textSpan.style.display = 'none';
+    editBtn.style.display = 'none';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = currentTitle;
+    input.className = 'edit-title-input';
+    input.style.width = '100%';
+    input.style.padding = '4px 8px';
+    input.style.fontSize = '1rem';
+    input.style.borderRadius = '4px';
+    input.style.border = '1px solid #3b82f6'; // Primary color
+    input.style.background = '#0f172a'; // bg-dark
+    input.style.color = '#f8fafc'; // text-main
+    input.style.outline = 'none';
+
+    input.onclick = (e) => e.stopPropagation();
+
+    let methodCalled = false;
+    const finish = async (save) => {
+        if (methodCalled) return;
+        methodCalled = true;
+        if (save) {
+            await saveMeetingTitle(meetingId, input.value, currentTitle);
+        } else {
+            cancelEditMode(meetingId, currentTitle);
+        }
+    }
+
+    input.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            input.blur(); // This will trigger onblur, which calls finish(true)
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            finish(false);
+        }
+    };
+
+    input.onblur = () => finish(true);
+
+    container.appendChild(input);
+    input.focus();
+}
+
+function cancelEditMode(meetingId, originalTitle) {
+    const container = document.getElementById(`title-container-${meetingId}`);
+    const textSpan = document.getElementById(`title-text-${meetingId}`);
+    const editBtn = document.getElementById(`btn-edit-${meetingId}`);
+    const input = container.querySelector('input');
+
+    if (input) input.remove();
+    if (textSpan) {
+        textSpan.innerText = originalTitle;
+        textSpan.style.display = '';
+    }
+    if (editBtn) editBtn.style.display = '';
+}
+
+async function saveMeetingTitle(meetingId, newTitle, originalTitle) {
+    if (!newTitle || !newTitle.trim()) {
+        alert("제목을 입력해주세요.");
+        cancelEditMode(meetingId, originalTitle);
+        return;
+    }
+
+    if (newTitle === originalTitle) {
+        cancelEditMode(meetingId, originalTitle);
+        return;
+    }
+
+    // UI Update (Optimistic-ish: disable input)
+    const container = document.getElementById(`title-container-${meetingId}`);
+    const input = container ? container.querySelector('input') : null;
+    if (input) input.disabled = true;
+
+    try {
+        const token = localStorage.getItem('access_token');
+        const response = await fetch(`/api/meeting/${meetingId}`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ title: newTitle })
+        });
+
+        if (response.ok) {
+            await loadMeetings(); // 목록 갱신 (전체 리로드)
+        } else {
+            const error = await response.json();
+            alert('이름 변경 실패: ' + (error.detail || '알 수 없는 오류'));
+            cancelEditMode(meetingId, originalTitle);
+        }
+    } catch (err) {
+        console.error(err);
+        alert('이름 변경 중 오류가 발생했습니다.');
+        cancelEditMode(meetingId, originalTitle);
+    }
+}
+
 async function deleteMeeting(event, meetingId) {
     event.stopPropagation(); // 카드 클릭 이벤트 전파 방지
 
-    if (!confirm("정말 이 회의를 삭제하시겠습니까?\n삭제된 데이터는 복구할 수 없습니다.")) {
+    if (!confirm("정말 이 회의를 삭제하시겠습니까?\\n삭제된 데이터는 복구할 수 없습니다.")) {
         return;
     }
 
