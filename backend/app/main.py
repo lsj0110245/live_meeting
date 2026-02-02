@@ -112,6 +112,11 @@ async def meeting_detail_page(request: Request, meeting_id: int):
     """회의 상세 페이지"""
     return templates.TemplateResponse("meeting_detail.html", {"request": request})
 
+@app.get("/recording", response_class=HTMLResponse)
+async def recording_page(request: Request):
+    """실시간 녹음 페이지"""
+    return templates.TemplateResponse("recording.html", {"request": request})
+
 
 
 # 데이터베이스 연결 테스트 엔드포인트

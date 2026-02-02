@@ -17,20 +17,14 @@ class Settings(BaseSettings):
     POSTGRES_DB: str
     DATABASE_URL: str
     
-    # Deepgram 설정 (Nova-2 Realtime)
-    DEEPGRAM_API_KEY: str | None = None
+    # Local STT (Faster-Whisper)
+    LOCAL_STT_URL: str = "http://localhost:9000"  # 레거시 호환용 (사용 안 함)
     
-    # AWS 설정 (Legacy - 제거 가능)
-    AWS_ACCESS_KEY_ID: str | None = None
-    AWS_SECRET_ACCESS_KEY: str | None = None
-    AWS_REGION: str = "us-east-1"
-    
-    # LLM API 설정
-    OPENAI_API_KEY: str | None = None
-    ANTHROPIC_API_KEY: str | None = None
-    LLM_MODEL: str = "llama3"  # Default to Local Llama 3
+    # LLM 설정 (Ollama)
+    LLM_MODEL: str = "llama3"  # Ollama 모델명
     LLM_MAX_TOKENS: int = 4096
-    LLM_TEMPERATURE: float = 0.3
+    LLM_TEMPERATURE: float = 0.3  # LLM 온도 설정
+    OLLAMA_BASE_URL: str = "http://llm:11434"  # Docker 내부 통신
     
     # LangSmith (Monitoring)
     LANGCHAIN_TRACING_V2: str = "false"

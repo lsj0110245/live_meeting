@@ -1,5 +1,7 @@
 import shutil
 import os
+import uuid
+import hashlib
 from typing import Any
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -71,9 +73,11 @@ async def upload_file(
     오디오 파일 업로드 및 STT 처리 요청
     
     1. 파일 확장자 검증
-    2. 로컬 스토리지(media/recordings/audio)에 파일 저장
-    3. Meeting DB 레코드 생성
-    4. 비동기 백그라운드 작업으로 STT 요청 (추후 구현)
+    2. 파일 해시(SHA-256) 계산
+    3. 중복 확인: 동일한 해시가 있으면 기존 파일 재사용
+    4. 신규 파일이면 로컬 스토리지(media/recordings/audio)에 저장
+    5. Meeting DB 레코드 생성
+    6. 비동기 백그라운드 작업으로 STT 요청
     """
     
     # 1. 파일 확장자 검증
@@ -84,42 +88,59 @@ async def upload_file(
             status_code=400,
             detail=f"지원하지 않는 파일 형식입니다. (허용: {settings.ALLOWED_EXTENSIONS})",
         )
+    
+    # 2. 파일 해시 계산 (SHA-256)
+    file_content = await file.read()
+    file_hash = hashlib.sha256(file_content).hexdigest()
+    
+    # 파일 포인터를 처음으로 되돌림 (저장을 위해)
+    await file.seek(0)
+    
+    # 3. 중복 확인
+    existing_meeting = db.query(Meeting).filter(Meeting.file_hash == file_hash).first()
+    
+    if existing_meeting:
+        # 중복 파일: 기존 파일 경로 재사용
+        file_path = existing_meeting.audio_file_path
+        print(f"중복 파일 감지: {file_hash[:16]}... 기존 파일 재사용: {file_path}")
+        is_duplicate = True
+    else:
+        # 신규 파일: 저장
+        upload_dir = "media/recordings/audio"
+        os.makedirs(upload_dir, exist_ok=True)
         
-    # 2. 파일 저장 경로 설정
-    upload_dir = "media/recordings/audio"
-    os.makedirs(upload_dir, exist_ok=True)
-    
-    # 파일명 충돌 방지를 위해 타임스탬프 또는 UUID 사용 권장 (여기선 간단히)
-    import uuid
-    safe_filename = f"{uuid.uuid4()}.{ext}"
-    file_path = os.path.join(upload_dir, safe_filename)
-    
-    # 파일 저장
-    try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"파일 저장 실패: {str(e)}")
-    finally:
-        file.file.close()
+        safe_filename = f"{uuid.uuid4()}.{ext}"
+        file_path = os.path.join(upload_dir, safe_filename)
+        
+        try:
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            print(f"신규 파일 저장: {file_path}")
+            is_duplicate = False
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"파일 저장 실패: {str(e)}")
+        finally:
+            file.file.close()
 
-    # 3. Meeting 레코드 생성 (상태: processing)
+    # 4. Meeting 레코드 생성 (file_hash 포함)
     meeting = Meeting(
-        title=filename,  # 기본값으로 파일명 사용
+        title=filename,
         owner_id=current_user.id,
         audio_file_path=file_path,
+        file_hash=file_hash,  # 해시값 저장
         description="파일 업로드된 회의"
     )
     db.add(meeting)
     db.commit()
     db.refresh(meeting)
     
-    # 4. Background Task로 STT 서비스 호출 (Whisper)
+    # 5. Background Task로 STT 서비스 호출 (중복이어도 전사는 수행)
     background_tasks.add_task(process_audio_file, meeting.id, file_path)
     
     return {
         "meeting_id": meeting.id,
         "filename": filename,
         "status": "uploaded",
-        "message": "파일이 성공적으로 업로드되었습니다. 분석이 곧 시작됩니다."
+        "is_duplicate": is_duplicate,
+        "message": "기존 파일을 재사용합니다. 분석이 곧 시작됩니다." if is_duplicate else "파일이 성공적으로 업로드되었습니다. 분석이 곧 시작됩니다."
     }

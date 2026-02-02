@@ -17,6 +17,7 @@ class Meeting(Base):
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     audio_file_path = Column(String, nullable=True) # 오디오 파일 경로 추가
+    file_hash = Column(String(64), nullable=True, index=True) # SHA-256 해시 (중복 방지용)
     status = Column(String, default="pending") # 회의 상태 (pending, processing, completed)
     
     # 관계 정의

@@ -51,7 +51,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [ gpu ]
-  
+
   # Local STT Engine (Whisper) - 주석 처리: 백엔드에서 직접 Whisper 모델 실행
   # stt:
   #   image: onerahmet/openai-whisper-asr-webservice:latest-gpu
@@ -87,6 +87,7 @@ services:
       - "11434:11434"
     networks:
       - lm_network
+    # GPU 할당 제거 (CPU 모드로 실행하여 VRAM 절약)
     deploy:
       resources:
         reservations:
@@ -94,21 +95,21 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [ gpu ]
-  # Nginx (선택 사항 - 프로덕션용)
-  # nginx:
-  #   image: nginx:alpine
-  #   container_name: lm_nginx
-  #   restart: always
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-  #     - ./frontend:/usr/share/nginx/html
-  #   depends_on:
-  #     - backend
-  #   networks:
-  #     - lm_network
+    # Nginx (선택 사항 - 프로덕션용)
+    # nginx:
+    #   image: nginx:alpine
+    #   container_name: lm_nginx
+    #   restart: always
+    #   ports:
+    #     - "80:80"
+    #     - "443:443"
+    #   volumes:
+    #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    #     - ./frontend:/usr/share/nginx/html
+    #   depends_on:
+    #     - backend
+    #   networks:
+    #     - lm_network
 
 volumes:
   postgres_data:
