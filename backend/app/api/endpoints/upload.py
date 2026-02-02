@@ -3,7 +3,7 @@ import os
 import uuid
 import hashlib
 from typing import Any
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Form
 from sqlalchemy.orm import Session
 from app.api import deps
 from app.db.session import get_db
@@ -66,19 +66,18 @@ async def upload_file(
     *,
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks,
+    title: str = Form(...),  # 회의명 (필수)
+    meeting_type: str = Form(...),  # 회의유형 (필수)
+    meeting_date: str = Form(...),  # ISO format string expected (필수)
+    attendees: str = Form(...),  # 참석자 (필수)
+    writer: str = Form(...),  # 작성자 (필수)
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
     """
     오디오 파일 업로드 및 STT 처리 요청
-    
-    1. 파일 확장자 검증
-    2. 파일 해시(SHA-256) 계산
-    3. 중복 확인: 동일한 해시가 있으면 기존 파일 재사용
-    4. 신규 파일이면 로컬 스토리지(media/recordings/audio)에 저장
-    5. Meeting DB 레코드 생성
-    6. 비동기 백그라운드 작업으로 STT 요청
     """
+    # ... (existing validation code) ...
     
     # 1. 파일 확장자 검증
     filename = file.filename
@@ -101,9 +100,11 @@ async def upload_file(
     
     if existing_meeting and os.path.exists(existing_meeting.audio_file_path):
         # 중복 파일: 기존 파일 경로 재사용 (실제 파일이 존재하는 경우에만)
-        file_path = existing_meeting.audio_file_path
-        print(f"중복 파일 감지: {file_hash[:16]}... 기존 파일 재사용: {file_path}")
         is_duplicate = True
+        # Note: We don't update metadata for existing meetings to avoid overwriting user history unintentionally
+        # unless specifically requested. For now, just return existing.
+        meeting = existing_meeting
+        
     else:
         # 신규 파일(또는 DB에는 있지만 실제 파일이 없는 경우): 저장
         upload_dir = "media/recordings/audio"
@@ -115,32 +116,44 @@ async def upload_file(
         try:
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-            print(f"신규 파일 저장: {file_path}")
             is_duplicate = False
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"파일 저장 실패: {str(e)}")
         finally:
             file.file.close()
 
-    # 4. Meeting 레코드 생성 (file_hash 포함)
-    meeting = Meeting(
-        title=filename,
-        owner_id=current_user.id,
-        audio_file_path=file_path,
-        file_hash=file_hash,  # 해시값 저장
-        description="파일 업로드된 회의"
-    )
-    db.add(meeting)
-    db.commit()
-    db.refresh(meeting)
-    
-    # 5. Background Task로 STT 서비스 호출 (중복이어도 전사는 수행)
-    background_tasks.add_task(process_audio_file, meeting.id, file_path)
+        # 4. Meeting 레코드 생성 (file_hash 포함)
+        from datetime import datetime
+        parsed_date = None
+        if meeting_date:
+            try:
+                parsed_date = datetime.fromisoformat(meeting_date.replace('Z', '+00:00'))
+            except:
+                pass # Fail silently or handle error
+
+        meeting = Meeting(
+            title=title,  # 사용자가 입력한 회의명 사용
+            owner_id=current_user.id,
+            audio_file_path=file_path,
+            file_hash=file_hash,
+            description="파일 업로드된 회의",
+            meeting_type=meeting_type,
+            meeting_date=parsed_date,
+            attendees=attendees,
+            writer=writer,
+            status="processing"  # 처리 중 상태로 시작
+        )
+        db.add(meeting)
+        db.commit()
+        db.refresh(meeting)
+        
+        # 5. Background Task로 STT 서비스 호출 (중복 아니거나 신규 생성일 때)
+        background_tasks.add_task(process_audio_file, meeting.id, file_path)
     
     return {
         "meeting_id": meeting.id,
         "filename": filename,
         "status": "uploaded",
-        "is_duplicate": is_duplicate,
-        "message": "기존 파일을 재사용합니다. 분석이 곧 시작됩니다." if is_duplicate else "파일이 성공적으로 업로드되었습니다. 분석이 곧 시작됩니다."
+        "is_duplicate": is_duplicate, 
+        "message": "기존 파일을 재사용합니다." if is_duplicate else "파일이 성공적으로 업로드되었습니다."
     }

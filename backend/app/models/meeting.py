@@ -21,6 +21,12 @@ class Meeting(Base):
     status = Column(String, default="pending") # 회의 상태 (pending, processing, completed)
     folder_id = Column(Integer, ForeignKey("folders.id"), nullable=True) # 폴더 ID 추가
     
+    # 추가 메타데이터
+    meeting_type = Column(String, nullable=True) # 회의 유형
+    meeting_date = Column(DateTime(timezone=True), nullable=True) # 회의 일시 (수동 입력)
+    attendees = Column(Text, nullable=True) # 참석자
+    writer = Column(String, nullable=True) # 작성자
+    
     # 관계 정의
     owner = relationship("User", back_populates="meetings")
     folder = relationship("Folder", back_populates="meetings")

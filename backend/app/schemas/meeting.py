@@ -7,6 +7,10 @@ from app.schemas.transcript import Transcript as TranscriptSchema
 class MeetingBase(BaseModel):
     title: str
     description: Optional[str] = None
+    meeting_type: Optional[str] = None
+    meeting_date: Optional[datetime] = None
+    attendees: Optional[str] = None
+    writer: Optional[str] = None
 
 # 회의 생성 요청 (Create)
 class MeetingCreate(MeetingBase):
@@ -16,6 +20,10 @@ class MeetingCreate(MeetingBase):
 class MeetingUpdate(MeetingBase):
     title: Optional[str] = None
     description: Optional[str] = None
+    meeting_type: Optional[str] = None
+    meeting_date: Optional[datetime] = None
+    attendees: Optional[str] = None
+    writer: Optional[str] = None
 
 # 요약 조회 응답
 class SummarySchema(BaseModel):

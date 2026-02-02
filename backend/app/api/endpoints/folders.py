@@ -119,3 +119,33 @@ def move_meeting_to_folder(
     db.add(meeting)
     db.commit()
     return {"status": "success"}
+
+@router.put("/{folder_id}/meetings")
+def bulk_move_meetings_to_folder(
+    *,
+    db: Session = Depends(get_db),
+    folder_id: int,
+    meeting_ids: List[int],
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    여러 회의를 특정 폴더로 이동 (folder_id가 0이면 미분류로 이동)
+    """
+    if folder_id != 0:
+        # 폴더 존재 확인
+        folder = db.query(Folder).filter(Folder.id == folder_id, Folder.owner_id == current_user.id).first()
+        if not folder:
+            raise HTTPException(status_code=404, detail="폴더를 찾을 수 없습니다.")
+    
+    # 회의들 조회 및 업데이트
+    meetings = db.query(Meeting).filter(Meeting.id.in_(meeting_ids), Meeting.owner_id == current_user.id).all()
+    
+    for meeting in meetings:
+        if folder_id == 0:
+            meeting.folder_id = None
+        else:
+            meeting.folder_id = folder_id
+        db.add(meeting)
+    
+    db.commit()
+    return {"status": "success", "updated_count": len(meetings)}

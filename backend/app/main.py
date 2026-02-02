@@ -107,6 +107,11 @@ async def register_page(request: Request):
     """회원가입 페이지"""
     return templates.TemplateResponse("register.html", {"request": request})
 
+@app.get("/folders/{folder_name}", response_class=HTMLResponse)
+async def folder_page(request: Request, folder_name: str):
+    """폴더별 페이지 (SPA 라우팅 지원)"""
+    return templates.TemplateResponse("index.html", {"request": request})
+
 @app.get("/meeting/{meeting_id}", response_class=HTMLResponse)
 async def meeting_detail_page(request: Request, meeting_id: int):
     """회의 상세 페이지"""

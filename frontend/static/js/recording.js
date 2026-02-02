@@ -44,23 +44,23 @@ function connectWebSocket() {
 
     websocket = new WebSocket(wsUrl);
 
-    websocket.onopen = function() {
+    websocket.onopen = function () {
         console.log('WebSocket 연결됨');
         updateStatus('connected', '연결됨');
     };
 
-    websocket.onmessage = function(event) {
+    websocket.onmessage = function (event) {
         const data = JSON.parse(event.data);
         handleWebSocketMessage(data);
     };
 
-    websocket.onclose = function() {
+    websocket.onclose = function () {
         console.log('WebSocket 연결 끊김');
         updateStatus('disconnected', '연결 끊김');
         stopRecording();
     };
 
-    websocket.onerror = function(error) {
+    websocket.onerror = function (error) {
         console.error('WebSocket 에러:', error);
         updateStatus('disconnected', '연결 오류');
     };
@@ -70,18 +70,18 @@ function connectWebSocket() {
  * WebSocket 메시지 처리
  */
 function handleWebSocketMessage(data) {
-    switch(data.type) {
+    switch (data.type) {
         case 'connected':
             console.log('서버 연결 확인:', data.message);
             break;
-            
+
         case 'buffering':
             // 버퍼링 상태 업데이트
             const progress = (data.buffer_seconds / 5) * 100;
             bufferProgress.style.width = progress + '%';
             bufferText.textContent = `버퍼링: ${data.buffer_seconds.toFixed(1)}/5초`;
             break;
-            
+
         case 'transcript':
             // 전사 결과 수신
             appendTranscript(data.text);
@@ -89,7 +89,7 @@ function handleWebSocketMessage(data) {
             bufferProgress.style.width = '0%';
             bufferText.textContent = '버퍼링: 0/5초';
             break;
-            
+
         case 'error':
             console.error('서버 에러:', data.message);
             break;
@@ -105,17 +105,103 @@ function updateStatus(status, text) {
 }
 
 /**
- * 녹음 시작
+ * 녹음 시작 버튼 클릭 - 메타데이터 모달 표시
  */
-async function startRecording() {
+let meetingMetadata = null;
+
+function startRecording() {
+    showMetadataModal('recording');
+}
+
+/**
+ * 메타데이터 모달 표시
+ */
+function showMetadataModal(mode = 'recording') {
+    const modal = document.getElementById('metadata-modal');
+    const dateInput = document.getElementById('meeting-date-input');
+
+    // 실시간 녹음인 경우 현재 시간으로 자동 설정 (readonly)
+    if (mode === 'recording') {
+        const now = new Date();
+        // datetime-local 형식으로 변환 (YYYY-MM-DDTHH:mm)
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const formattedDate = `${year}-${month}-${day}T${hours}:${minutes}`;
+
+        dateInput.value = formattedDate;
+        dateInput.setAttribute('readonly', 'readonly');
+        dateInput.style.backgroundColor = 'var(--bg-dark)';
+        dateInput.style.cursor = 'not-allowed';
+    } else {
+        // 파일 업로드인 경우 직접 입력 가능
+        dateInput.removeAttribute('readonly');
+        dateInput.style.backgroundColor = '';
+        dateInput.style.cursor = '';
+    }
+
+    modal.style.display = 'flex';
+}
+
+/**
+ * 메타데이터 모달 닫기
+ */
+function closeMetadataModal() {
+    const modal = document.getElementById('metadata-modal');
+    const form = document.getElementById('metadata-form');
+    form.reset();
+    modal.style.display = 'none';
+}
+
+/**
+ * 메타데이터 제출
+ */
+function submitMetadata() {
+    const form = document.getElementById('metadata-form');
+
+    // 유효성 검사
+    if (!form.checkValidity()) {
+        alert('모든 필드를 입력해주세요.');
+        return;
+    }
+
+    // 메타데이터 수집
+    meetingMetadata = {
+        title: document.getElementById('meeting-title-input').value.trim(),
+        meeting_type: document.getElementById('meeting-type-input').value.trim(),
+        meeting_date: document.getElementById('meeting-date-input').value,
+        attendees: document.getElementById('meeting-attendees-input').value.trim(),
+        writer: document.getElementById('meeting-writer-input').value.trim()
+    };
+
+    // 모달 닫기
+    closeMetadataModal();
+
+    // 편집 모드인 경우 저장 후 대시보드로 이동
+    if (window.isEditMode) {
+        alert('회의 정보가 업데이트되었습니다.');
+        window.location.href = '/';
+        window.isEditMode = false;
+    } else {
+        // 실제 녹음 시작
+        startRecordingWithMetadata();
+    }
+}
+
+/**
+ * 메타데이터와 함께 실제 녹음 시작
+ */
+async function startRecordingWithMetadata() {
     try {
         // 마이크 권한 요청
-        const stream = await navigator.mediaDevices.getUserMedia({ 
+        const stream = await navigator.mediaDevices.getUserMedia({
             audio: {
                 echoCancellation: true,
                 noiseSuppression: true,
                 sampleRate: 16000
-            } 
+            }
         });
 
         // WebSocket 연결
@@ -125,18 +211,27 @@ async function startRecording() {
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
+        // 메타데이터 전송
+        if (websocket && websocket.readyState === WebSocket.OPEN && meetingMetadata) {
+            websocket.send(JSON.stringify({
+                type: 'metadata',
+                data: meetingMetadata
+            }));
+            console.log('메타데이터 전송:', meetingMetadata);
+        }
+
         // MediaRecorder 설정
         const options = { mimeType: 'audio/webm;codecs=opus' };
         mediaRecorder = new MediaRecorder(stream, options);
 
-        mediaRecorder.ondataavailable = function(event) {
+        mediaRecorder.ondataavailable = function (event) {
             if (event.data.size > 0 && websocket && websocket.readyState === WebSocket.OPEN) {
                 // 오디오 청크를 WebSocket으로 전송
                 websocket.send(event.data);
             }
         };
 
-        mediaRecorder.onstop = function() {
+        mediaRecorder.onstop = function () {
             stream.getTracks().forEach(track => track.stop());
         };
 
@@ -169,9 +264,9 @@ function stopRecording() {
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         mediaRecorder.stop();
     }
-    
+
     isRecording = false;
-    
+
     // UI 업데이트
     btnStart.disabled = false;
     btnStop.disabled = true;
@@ -190,6 +285,51 @@ function stopRecording() {
         fullTranscriptSection.style.display = 'block';
         fullTranscriptEl.value = fullTranscript;
     }
+
+    // 메타데이터 수정 확인 모달 표시
+    showEditConfirmationModal();
+}
+
+/**
+ * 메타데이터 수정 확인 모달 표시
+ */
+function showEditConfirmationModal() {
+    if (confirm('녹음이 완료되었습니다. 회의 정보를 수정하시겠습니까?')) {
+        // 수정 선택 - 메타데이터 편집 모달 표시
+        showEditMetadataModal();
+    } else {
+        // 그대로 저장 - 대시보드로 이동
+        alert('회의가 저장되었습니다.');
+        window.location.href = '/';
+    }
+}
+
+/**
+ * 메타데이터 편집 모달 표시
+ */
+function showEditMetadataModal() {
+    const modal = document.getElementById('metadata-modal');
+    const form = document.getElementById('metadata-form');
+
+    // 기존 메타데이터로 폼 채우기
+    if (meetingMetadata) {
+        document.getElementById('meeting-title-input').value = meetingMetadata.title;
+        document.getElementById('meeting-type-input').value = meetingMetadata.meeting_type;
+        document.getElementById('meeting-date-input').value = meetingMetadata.meeting_date;
+        document.getElementById('meeting-attendees-input').value = meetingMetadata.attendees;
+        document.getElementById('meeting-writer-input').value = meetingMetadata.writer;
+    }
+
+    // 회의일시 필드를 편집 가능하게 변경
+    const dateInput = document.getElementById('meeting-date-input');
+    dateInput.removeAttribute('readonly');
+    dateInput.style.backgroundColor = '';
+    dateInput.style.cursor = '';
+
+    modal.style.display = 'flex';
+
+    // submitMetadata 함수를 재정의하여 편집 모드로 동작
+    window.isEditMode = true;
 }
 
 /**
@@ -199,8 +339,8 @@ function updateTimer() {
     recordingSeconds++;
     const minutes = Math.floor(recordingSeconds / 60);
     const seconds = recordingSeconds % 60;
-    timerDisplay.textContent = 
-        String(minutes).padStart(2, '0') + ':' + 
+    timerDisplay.textContent =
+        String(minutes).padStart(2, '0') + ':' +
         String(seconds).padStart(2, '0');
 }
 
@@ -209,23 +349,23 @@ function updateTimer() {
  */
 function appendTranscript(text) {
     if (!text.trim()) return;
-    
+
     // 기존 placeholder 제거
     const placeholder = transcriptContent.querySelector('.placeholder-text');
     if (placeholder) {
         placeholder.remove();
     }
-    
+
     // 새 전사 결과 추가
     const span = document.createElement('span');
     span.className = 'transcript-segment';
     span.textContent = text + ' ';
     span.style.animation = 'fadeIn 0.3s';
     transcriptContent.appendChild(span);
-    
+
     // 자동 스크롤
     transcriptContent.scrollTop = transcriptContent.scrollHeight;
-    
+
     // 전체 전사에 추가
     fullTranscript += text + ' ';
 }
@@ -249,20 +389,20 @@ function saveTranscript() {
 }
 
 // 페이지 로드 시 WebSocket 연결
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // 로그인 확인
     const token = localStorage.getItem('access_token');
     if (!token) {
         window.location.href = '/login';
         return;
     }
-    
+
     // WebSocket 연결
     connectWebSocket();
 });
 
 // 페이지 이탈 시 정리
-window.addEventListener('beforeunload', function() {
+window.addEventListener('beforeunload', function () {
     if (websocket) {
         websocket.close();
     }

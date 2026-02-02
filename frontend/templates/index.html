@@ -122,6 +122,25 @@
             <div class="dashboard-header">
                 <h1 id="page-title"><i class="fa-solid fa-folder-open"></i> 전체 회의</h1>
                 <div class="header-actions">
+                    <div id="bulk-actions" style="display: none; margin-right: 15px;">
+                        <span id="selected-count" style="margin-right: 10px; color: var(--text-sub);">0개 선택됨</span>
+                        <div class="dropdown" style="display: inline-block;">
+                            <button class="btn btn-outline" style="font-size: 0.9rem;">
+                                <i class="fa-solid fa-folder-open"></i> 이동 <i class="fa-solid fa-chevron-down"></i>
+                            </button>
+                            <div class="dropdown-content" id="move-to-dropdown" style="right: 0; left: auto;">
+                                <!-- 폴더 목록 동적 생성 -->
+                            </div>
+                        </div>
+                        <button class="btn btn-outline" onclick="deleteSelectedMeetings()"
+                            style="font-size: 0.9rem; margin-left: 5px; color: #ef4444; border-color: #ef4444;">
+                            <i class="fa-solid fa-trash"></i> 삭제
+                        </button>
+                        <button id="btn-remove-from-list" class="btn btn-outline" onclick="removeFromList()"
+                            style="font-size: 0.9rem; margin-left: 5px; display: none;">
+                            <i class="fa-solid fa-minus"></i> 목록에서 제거
+                        </button>
+                    </div>
                     <button id="btn-upload" class="btn btn-outline"><i class="fa-solid fa-cloud-arrow-up"></i> 파일
                         업로드</button>
                     <!-- 숨겨진 파일 입력 -->
@@ -138,6 +157,8 @@
             </div>
         </main>
     </div>
+
+    {% include 'components/metadata_modal.html' %}
 </div>
 {% endblock %}
 

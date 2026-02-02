@@ -1,0 +1,157 @@
+<! -- 회의 메타데이터 입력 모달 -->
+    <div id="metadata-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-file-lines"></i> 회의 정보 입력</h2>
+                <button class="modal-close" onclick="closeMetadataModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="metadata-form">
+                    <div class="form-group">
+                        <label for="meeting-title-input">회의명 <span class="required">*</span></label>
+                        <input type="text" id="meeting-title-input" class="form-control" placeholder="회의 제목을 입력하세요"
+                            required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="meeting-type-input">회의유형 <span class="required">*</span></label>
+                        <input type="text" id="meeting-type-input" class="form-control" placeholder="예: 프로젝트 회의, 팀 미팅 등"
+                            required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="meeting-date-input">회의일시 <span class="required">*</span></label>
+                        <input type="datetime-local" id="meeting-date-input" class="form-control" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="meeting-attendees-input">참석자 <span class="required">*</span></label>
+                        <input type="text" id="meeting-attendees-input" class="form-control"
+                            placeholder="이름을 쉼표로 구분하여 입력하세요 (예: 홍길동, 김철수)" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="meeting-writer-input">작성자 <span class="required">*</span></label>
+                        <input type="text" id="meeting-writer-input" class="form-control" placeholder="작성자 이름을 입력하세요"
+                            required>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeMetadataModal()">취소</button>
+                <button class="btn" onclick="submitMetadata()">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        .modal-content {
+            background: var(--card-bg);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-50px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 25px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.3rem;
+            color: var(--text-primary);
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.8rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            padding: 25px;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .required {
+            color: var(--error);
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .form-control::placeholder {
+            color: var(--text-secondary);
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            padding: 20px 25px;
+            border-top: 1px solid var(--border);
+        }
+    </style>

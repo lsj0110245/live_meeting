@@ -1,6 +1,8 @@
 // 회의 상세 페이지 로직
 
 const meetingId = window.location.pathname.split('/').pop();
+let currentExportFormat = null;
+let currentMeetingData = {}; // 현재 회의 데이터 저장용
 
 document.addEventListener('DOMContentLoaded', async () => {
     const token = localStorage.getItem('access_token');
@@ -24,9 +26,10 @@ async function loadMeetingDetails() {
         if (!response.ok) { alert('회의 정보를 불러올 수 없습니다.'); return; }
 
         const meeting = await response.json();
+        currentMeetingData = meeting; // 데이터 저장
 
         document.getElementById('meeting-title').innerText = meeting.title;
-        document.getElementById('meeting-date').innerText = new Date(meeting.created_at).toLocaleString();
+        document.getElementById('meeting-date').innerText = new Date(meeting.meeting_date || meeting.created_at).toLocaleString(); // meeting_date 우선 사용
         document.getElementById('meeting-desc').innerText = meeting.description || '설명 없음';
 
         if (meeting.audio_file_path) {
@@ -123,9 +126,155 @@ async function generateSummary() {
     }
 }
 
-function exportMeeting(format) {
-    const token = localStorage.getItem('access_token');
-    window.location.href = `/api/export/${meetingId}?format=${format}&token=${token}`;
+// 메타데이터 모달 표시 (내보내기 전 수정)
+function showMetadataModal(format) {
+    currentExportFormat = format;
+    const modal = document.getElementById('metadata-modal');
+    
+    // 현재 데이터로 폼 채우기
+    if (currentMeetingData) {
+        document.getElementById('meeting-title-input').value = currentMeetingData.title || '';
+        document.getElementById('meeting-type-input').value = currentMeetingData.meeting_type || '';
+        document.getElementById('meeting-date-input').value = currentMeetingData.meeting_date ? currentMeetingData.meeting_date.substring(0, 16) : '';
+        document.getElementById('meeting-attendees-input').value = currentMeetingData.attendees || '';
+        document.getElementById('meeting-writer-input').value = currentMeetingData.writer || '';
+    }
+    
+    // 편집 가능하도록 설정 (READONLY 해제)
+    const dateInput = document.getElementById('meeting-date-input');
+    dateInput.removeAttribute('readonly');
+    dateInput.style.backgroundColor = '';
+    dateInput.style.cursor = '';
+    
+    // 버튼 텍스트와 동작 변경
+    const submitBtn = document.querySelector('#metadata-form button[type="button"]');
+    if(submitBtn) {
+        submitBtn.textContent = "저장 후 내보내기";
+        submitBtn.onclick = submitMetadataAndExport;
+    }
+
+    // 모달 닫기 버튼에도 이벤트 연결 (필요 시)
+    // 보통 모달 내부의 닫기 버튼은 onclick="closeMetadataModal()"로 되어 있을 것임.
+    
+    modal.style.display = 'flex';
 }
+
+function closeMetadataModal() {
+    const modal = document.getElementById('metadata-modal');
+    if(modal) modal.style.display = 'none';
+    currentExportFormat = null;
+}
+
+// 메타데이터 저장 후 내보내기
+async function submitMetadataAndExport() {
+    const form = document.getElementById('metadata-form');
+    // HTML5 유효성 검사 (required 등)
+    if (!form.checkValidity()) {
+        form.reportValidity(); // 브라우저 기본 알림 표시
+        return;
+    }
+    
+    const updateData = {
+        title: document.getElementById('meeting-title-input').value.trim(),
+        meeting_type: document.getElementById('meeting-type-input').value.trim(),
+        meeting_date: document.getElementById('meeting-date-input').value, // datetime-local format
+        attendees: document.getElementById('meeting-attendees-input').value.trim(),
+        writer: document.getElementById('meeting-writer-input').value.trim()
+    };
+    
+    const token = localStorage.getItem('access_token');
+    
+    try {
+        // 1. 메타데이터 업데이트 API 호출
+        const updateResponse = await fetch(`/api/meeting/${meetingId}`, {
+            method: 'PUT',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(updateData)
+        });
+        
+        if (!updateResponse.ok) {
+            const errorData = await updateResponse.json();
+            throw new Error(errorData.detail || '메타데이터 업데이트 실패');
+        }
+        
+        // 최신 데이터로 로컬 갱신
+        const updatedMeeting = await updateResponse.json();
+        currentMeetingData = updatedMeeting;
+        
+        // UI 타이틀 업데이트 등 필요하다면 수행
+        document.getElementById('meeting-title').innerText = updatedMeeting.title;
+
+        alert('회의 정보가 수정되었습니다. 다운로드를 시작합니다.');
+        closeMetadataModal();
+        
+        // 2. 내보내기 실행
+        if (currentExportFormat) {
+            await executeExport(currentExportFormat);
+        }
+        
+    } catch (err) {
+        console.error('Error:', err);
+        alert('오류가 발생했습니다: ' + err.message);
+    }
+}
+
+async function executeExport(format) {
+    const token = localStorage.getItem('access_token');
+    
+    try {
+        const response = await fetch(`/api/export/${meetingId}?format=${format}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        
+        if (!response.ok) {
+            alert('내보내기 실패: ' + response.statusText);
+            return;
+        }
+        
+        // Blob으로 변환
+        const blob = await response.blob();
+        
+        // 다운로드 링크 생성
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        
+        // 파일명 추출 (Content-Disposition 헤더에서)
+        const contentDisposition = response.headers.get('Content-Disposition');
+        let filename = `meeting_${meetingId}.${format}`;
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename=(.+)/);
+            if (filenameMatch) {
+                filename = filenameMatch[1];
+            }
+        }
+        
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        
+        // 정리
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+    } catch (err) {
+        console.error('Export error:', err);
+        alert('내보내기 중 오류가 발생했습니다.');
+    }
+}
+
+// exportMeeting 함수 수정: 모달 열기
+function exportMeeting(format) {
+    showMetadataModal(format);
+}
+
 // 전역 스코프로 노출 (HTML onclick에서 사용)
 window.exportMeeting = exportMeeting;
+window.closeMetadataModal = closeMetadataModal;
+window.submitMetadataAndExport = submitMetadataAndExport;

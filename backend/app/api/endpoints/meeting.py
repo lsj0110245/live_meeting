@@ -70,6 +70,10 @@ def create_meeting(
     meeting = Meeting(
         title=meeting_in.title,
         description=meeting_in.description,
+        meeting_type=meeting_in.meeting_type,
+        meeting_date=meeting_in.meeting_date,
+        attendees=meeting_in.attendees,
+        writer=meeting_in.writer,
         owner_id=current_user.id
     )
     db.add(meeting)
@@ -179,4 +183,40 @@ def delete_meeting(
     db.delete(meeting)
     db.commit()
     
+    db.delete(meeting)
+    db.commit()
+    
     return {"message": "회의가 삭제되었습니다."}
+
+@router.delete("/")
+def bulk_delete_meetings(
+    meeting_ids: List[int],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    여러 회의 일괄 삭제
+    """
+    meetings = db.query(Meeting).filter(Meeting.id.in_(meeting_ids), Meeting.owner_id == current_user.id).all()
+    
+    deleted_count = 0
+    import os
+    
+    for meeting in meetings:
+        # 파일 삭제 logic
+        if meeting.audio_file_path:
+            file_path = meeting.audio_file_path
+            if not os.path.isabs(file_path):
+                 file_path = os.path.join("/app", file_path)
+            
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                print(f"Error deleting file {file_path}: {e}")
+        
+        db.delete(meeting)
+        deleted_count += 1
+        
+    db.commit()
+    return {"message": f"{deleted_count}개의 회의가 삭제되었습니다."}
