@@ -4,36 +4,139 @@
 
 {% block content %}
 <!-- 로그인 전 랜딩 페이지 -->
-<div id="landing-view" class="landing-container" style="text-align: center; padding: 50px 20px;">
-    <h1 style="font-size: 2.5rem; margin-bottom: 20px;">LiveMeeting에 오신 것을 환영합니다</h1>
-    <p style="font-size: 1.2rem; color: var(--text-secondary); margin-bottom: 40px;">
-        AI 기반 실시간 회의록 자동 생성 및 요약 서비스입니다.<br>
-        회의를 녹음하거나 파일을 업로드하여 스마트한 회의록을 경험해보세요.
-    </p>
-    <div class="landing-actions" style="display: flex; gap: 20px; justify-content: center;">
-        <a href="/login" class="btn btn-primary" style="padding: 15px 40px; font-size: 1.1rem;">로그인</a>
-        <a href="/register" class="btn btn-outline" style="padding: 15px 40px; font-size: 1.1rem;">회원가입</a>
-    </div>
+<!-- 로그인 전 랜딩 페이지 -->
+<div id="landing-view" style="display: none;">
+
+    <!-- Hero Section -->
+    <section class="landing-hero">
+        <div class="hero-bg">
+            <img src="/static/images/hero.png" alt="Background">
+            <div class="overlay"></div>
+        </div>
+        <div class="hero-content text-center">
+            <span class="badge-pill">✨ AI 기반 회의록 솔루션</span>
+            <h1 class="animate-up">회의의 모든 순간을<br> <span class="text-gradient">AI로 완벽하게 기록하세요</span></h1>
+            <p class="animate-up delay-1">
+                실시간 음성 인식부터 핵심 요약까지.<br>
+                LiveMeeting이 당신의 업무 생산성을 혁신적으로 높여드립니다.
+            </p>
+            <div class="hero-actions animate-up delay-2">
+                <a href="/register" class="btn btn-lg btn-glow">무료로 시작하기 <i class="fa-solid fa-arrow-right"></i></a>
+                <a href="/login" class="btn btn-lg btn-outline-light">로그인</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="landing-features">
+        <div class="section-header text-center">
+            <h2>왜 LiveMeeting인가요?</h2>
+            <p>단순한 녹음을 넘어, 맥락을 이해하는 AI 파트너입니다.</p>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="icon-box"><i class="fa-solid fa-microphone-lines"></i></div>
+                <h3>실시간 STT</h3>
+                <p>99% 정확도의 음성 인식으로<br>회의 내용을 놓치지 않고 기록합니다.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon-box"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+                <h3>AI 자동 요약</h3>
+                <p>긴 회의도 3줄 요약부터<br>핵심 안건 정리까지 한 번에 해결하세요.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon-box"><i class="fa-solid fa-cloud"></i></div>
+                <h3>안전한 클라우드</h3>
+                <p>모든 데이터는 암호화되어<br>안전하게 보관되며 언제든 열람 가능합니다.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="landing-footer">
+        <p>&copy; 2026 LiveMeeting. All rights reserved.</p>
+        <div class="footer-links">
+            <a href="#">이용약관</a>
+            <a href="#">개인정보처리방침</a>
+            <a href="#">문의하기</a>
+        </div>
+    </footer>
 </div>
 
-<!-- 로그인 후 대시보드 (기존 내용) -->
+<!-- 로그인 후 대시보드 -->
 <div id="dashboard-view" style="display: none;">
-    <div class="dashboard-header">
-        <h1><i class="fa-solid fa-shapes"></i> 내 회의 목록</h1>
-        <div class="header-actions">
-            <a href="/recording" class="btn"><i class="fa-solid fa-plus"></i> 새 회의 시작</a>
-            <button id="btn-upload" class="btn btn-outline"><i class="fa-solid fa-upload"></i> 파일 업로드</button>
-            <!-- 숨겨진 파일 입력 -->
-            <input type="file" id="file-input" accept="audio/*,video/*" style="display: none;">
-        </div>
-    </div>
+    <div class="dashboard-container"
+        style="display: flex; gap: 30px; max-width: 1400px; margin: 0 auto; padding: 0 2%;">
 
-    <div class="meeting-list" id="meeting-list">
-        <!-- 로딩 중 -->
-        <div class="loading-state">
-            <i class="fa-solid fa-circle-notch fa-spin"></i>
-            <p>회의 목록을 불러오는 중...</p>
-        </div>
+        <!-- Sidebar -->
+        <aside class="sidebar" style="width: 250px; flex-shrink: 0;">
+            <div class="sidebar-menu">
+                <button class="menu-item active" data-filter="all" onclick="filterMeetings('all')">
+                    <i class="fa-solid fa-layer-group"></i> 전체 회의
+                </button>
+                <button class="menu-item" data-filter="unclassified" onclick="filterMeetings('unclassified')">
+                    <i class="fa-regular fa-folder"></i> 미분류
+                </button>
+            </div>
+
+            <div class="folder-section" style="margin-top: 30px;">
+                <div class="section-title"
+                    style="display: flex; justify-content: space-between; align-items: center; color: var(--text-sub); margin-bottom: 15px; font-size: 0.9rem;">
+                    <span>MY FOLDERS</span>
+                    <button onclick="createFolder()" class="btn-icon"
+                        style="background: none; border: none; color: var(--primary); cursor: pointer;"><i
+                            class="fa-solid fa-plus"></i></button>
+                </div>
+                <div id="folder-list" class="folder-list">
+                    <!-- 폴더 목록이 여기에 동적으로 추가됨 -->
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content" style="flex: 1;">
+
+            <!-- Hero Section -->
+            <div class="hero-section"
+                style="margin-bottom: 30px; position: relative; border-radius: 16px; overflow: hidden; height: 180px; display: flex; align-items: center; justify-content: center;">
+                <img src="/static/images/hero.png" alt="LiveMeeting Hero"
+                    style="width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; z-index: 1;">
+                <div class="hero-overlay"
+                    style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(90deg, rgba(15,23,42,0.9) 0%, rgba(15,23,42,0.4) 100%); z-index: 2;">
+                </div>
+                <div class="hero-content"
+                    style="position: relative; z-index: 3; width: 100%; padding: 0 40px; display: flex; justify-content: space-between; align-items: center;">
+                    <div class="hero-text">
+                        <h2
+                            style="font-size: 1.8rem; font-weight: 700; margin-bottom: 5px; text-shadow: 0 2px 4px rgba(0,0,0,0.5);">
+                            스마트한 미팅의 시작</h2>
+                        <p style="color: #cbd5e1; font-size: 1rem; max-width: 500px;">AI가 실시간으로 회의를 기록하고 요약해드립니다.</p>
+                    </div>
+                    <a href="/recording" class="btn btn-lg"
+                        style="padding: 12px 24px; font-size: 1.1rem; box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3);">
+                        <i class="fa-solid fa-microphone"></i> 실시간 회의 시작
+                    </a>
+                </div>
+            </div>
+
+            <div class="dashboard-header">
+                <h1 id="page-title"><i class="fa-solid fa-folder-open"></i> 전체 회의</h1>
+                <div class="header-actions">
+                    <button id="btn-upload" class="btn btn-outline"><i class="fa-solid fa-cloud-arrow-up"></i> 파일
+                        업로드</button>
+                    <!-- 숨겨진 파일 입력 -->
+                    <input type="file" id="file-input" accept="audio/*,video/*" style="display: none;">
+                </div>
+            </div>
+
+            <div class="meeting-list" id="meeting-list">
+                <!-- 로딩 중 -->
+                <div class="loading-state">
+                    <i class="fa-solid fa-circle-notch fa-spin"></i>
+                    <p>회의 목록을 불러오는 중...</p>
+                </div>
+            </div>
+        </main>
     </div>
 </div>
 {% endblock %}

@@ -34,6 +34,7 @@ class Meeting(MeetingBase):
     created_at: datetime
     status: Optional[str] = "completed"
     audio_file_path: Optional[str] = None
+    folder_id: Optional[int] = None # 폴더 ID 추가
     
     # 전사 및 요약 정보 (SQLAlchemy 관계명과 일치시켜야 함)
     transcripts: List[TranscriptSchema] = []

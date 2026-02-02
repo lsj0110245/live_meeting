@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # JWT 인증 설정
     SECRET_KEY: str
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     
     # CORS 설정
     CORS_ORIGINS: str = "http://localhost:8000,http://localhost:3000,http://localhost:8001"
@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     
     # STT 설정
     STT_LANGUAGE: str = "ko-KR"
+    STT_MODEL_SIZE: str = "medium"
+    STT_DEVICE: str = "cuda"
+    STT_COMPUTE_TYPE: str = "float16"
     
     # 스토리지 설정
     STORAGE_TYPE: str = "local"  # or "s3"

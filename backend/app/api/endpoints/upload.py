@@ -99,13 +99,13 @@ async def upload_file(
     # 3. 중복 확인
     existing_meeting = db.query(Meeting).filter(Meeting.file_hash == file_hash).first()
     
-    if existing_meeting:
-        # 중복 파일: 기존 파일 경로 재사용
+    if existing_meeting and os.path.exists(existing_meeting.audio_file_path):
+        # 중복 파일: 기존 파일 경로 재사용 (실제 파일이 존재하는 경우에만)
         file_path = existing_meeting.audio_file_path
         print(f"중복 파일 감지: {file_hash[:16]}... 기존 파일 재사용: {file_path}")
         is_duplicate = True
     else:
-        # 신규 파일: 저장
+        # 신규 파일(또는 DB에는 있지만 실제 파일이 없는 경우): 저장
         upload_dir = "media/recordings/audio"
         os.makedirs(upload_dir, exist_ok=True)
         

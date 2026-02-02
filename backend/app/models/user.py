@@ -15,5 +15,12 @@ class User(Base):
     username = Column(String, index=True) # 사용자 이름 추가
     hashed_password = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
+    
+    # 프로필 추가 정보
+    age = Column(Integer, nullable=True)
+    phone_number = Column(String, nullable=True)
+    team_name = Column(String, nullable=True)
+    profile_image_path = Column(String, nullable=True)
     # 관계 정의
     meetings = relationship("Meeting", back_populates="owner", cascade="all, delete-orphan")
+    folders = relationship("Folder", back_populates="owner", cascade="all, delete-orphan")

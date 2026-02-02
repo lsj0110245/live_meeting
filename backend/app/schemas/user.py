@@ -6,6 +6,10 @@ class UserBase(BaseModel):
     email: EmailStr
     username: str | None = Field(None, max_length=10)
     is_active: bool | None = True
+    age: int | None = None
+    phone_number: str | None = None
+    team_name: str | None = None
+    profile_image_path: str | None = None
 
 # 회원가입 시 받을 데이터 (Create)
 class UserCreate(UserBase):
@@ -17,6 +21,10 @@ class UserUpdate(BaseModel):
     username: str | None = None
     password: str | None = None
     is_active: bool | None = None
+    age: int | None = None
+    phone_number: str | None = None
+    team_name: str | None = None
+    profile_image_path: str | None = None
 
 # DB에서 조회된 데이터 (Response)
 # 비밀번호는 포함하지 않음

@@ -117,6 +117,11 @@ async def recording_page(request: Request):
     """실시간 녹음 페이지"""
     return templates.TemplateResponse("recording.html", {"request": request})
 
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request):
+    """프로필 페이지"""
+    return templates.TemplateResponse("profile.html", {"request": request})
+
 
 
 # 데이터베이스 연결 테스트 엔드포인트
@@ -141,8 +146,10 @@ async def test_database():
 
 
 # API 라우터 등록
-from app.api.endpoints import auth, recording, upload, meeting, export
+from app.api.endpoints import auth, recording, upload, meeting, export, users, folders
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
+app.include_router(users.router, prefix="/api/users", tags=["Users"])
+app.include_router(folders.router, prefix="/api/folders", tags=["Folders"])
 app.include_router(recording.router, prefix="/api/recording", tags=["Recording"])
 app.include_router(upload.router, prefix="/api/upload", tags=["Upload"])
 app.include_router(meeting.router, prefix="/api/meeting", tags=["Meeting"])

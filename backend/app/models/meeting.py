@@ -19,8 +19,10 @@ class Meeting(Base):
     audio_file_path = Column(String, nullable=True) # 오디오 파일 경로 추가
     file_hash = Column(String(64), nullable=True, index=True) # SHA-256 해시 (중복 방지용)
     status = Column(String, default="pending") # 회의 상태 (pending, processing, completed)
+    folder_id = Column(Integer, ForeignKey("folders.id"), nullable=True) # 폴더 ID 추가
     
     # 관계 정의
     owner = relationship("User", back_populates="meetings")
+    folder = relationship("Folder", back_populates="meetings")
     transcripts = relationship("Transcript", back_populates="meeting", cascade="all, delete-orphan")
     summary = relationship("Summary", uselist=False, back_populates="meeting", cascade="all, delete-orphan")

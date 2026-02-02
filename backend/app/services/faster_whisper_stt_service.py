@@ -21,11 +21,12 @@ class FasterWhisperSTTService:
     - 실시간 STT: 5초 청크, 속도 우선
     """
     
-    def __init__(self, model_size: str = "medium"):
-        self.model_size = model_size
+    def __init__(self):
+        from app.core.config import settings
+        self.model_size = settings.STT_MODEL_SIZE
         self.model: Optional[WhisperModel] = None
-        self.device = "cuda"  # GPU 사용
-        self.compute_type = "float16"  # GPU 최적화
+        self.device = settings.STT_DEVICE
+        self.compute_type = settings.STT_COMPUTE_TYPE
         
     def _initialize_model(self):
         """모델 초기화 (필요 시에만 로드)"""

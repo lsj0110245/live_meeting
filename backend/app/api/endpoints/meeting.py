@@ -32,6 +32,7 @@ def read_meetings(
     meetings = (
         db.query(Meeting)
         .filter(Meeting.owner_id == current_user.id)
+        .order_by(Meeting.id.desc())
         .offset(skip)
         .limit(limit)
         .all()

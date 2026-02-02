@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}내 프로필 - LiveMeeting{% endblock %}
+
+{% block content %}
+<div class="profile-container" style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+    <div class="card">
+        <h2 style="margin-bottom: 30px; text-align: center;">내 프로필</h2>
+
+        <div class="profile-image-section" style="text-align: center; margin-bottom: 30px;">
+            <div class="image-wrapper"
+                style="position: relative; width: 120px; height: 120px; margin: 0 auto; border-radius: 50%; overflow: hidden; border: 3px solid var(--primary); background: #333;">
+                <img id="profile-img" src="" alt="Profile Image"
+                    style="width: 100%; height: 100%; object-fit: cover; display: none;">
+                <div id="profile-placeholder"
+                    style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 3rem; color: #666;">
+                    <i class="fa-solid fa-user"></i>
+                </div>
+
+                <label for="image-upload"
+                    style="position: absolute; bottom: 0; left: 0; width: 100%; background: rgba(0,0,0,0.6); color: white; padding: 5px; font-size: 0.8rem; cursor: pointer; display: none;"
+                    id="upload-label">
+                    변경
+                </label>
+                <input type="file" id="image-upload" accept="image/*" style="display: none;">
+            </div>
+            <button class="btn btn-outline" onclick="document.getElementById('image-upload').click()"
+                style="margin-top: 15px; font-size: 0.9rem;">
+                <i class="fa-solid fa-camera"></i> 사진 변경
+            </button>
+        </div>
+
+        <form id="profile-form" onsubmit="return false;">
+            <div class="form-group">
+                <label>이메일</label>
+                <input type="email" id="email" disabled
+                    style="background: rgba(255,255,255,0.05); color: #aaa; cursor: not-allowed;">
+            </div>
+
+            <div class="form-group">
+                <label>이름</label>
+                <input type="text" id="username" placeholder="이름을 입력하세요">
+            </div>
+
+            <div class="form-group">
+                <label>팀명</label>
+                <input type="text" id="team_name" placeholder="소속 팀명을 입력하세요">
+            </div>
+
+            <div class="form-group" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div>
+                    <label>나이</label>
+                    <input type="number" id="age" placeholder="나이">
+                </div>
+                <div>
+                    <label>전화번호</label>
+                    <input type="tel" id="phone_number" placeholder="010-0000-0000">
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-full" onclick="updateProfile()">저장하기</button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/profile.js"></script>
+{% endblock %}

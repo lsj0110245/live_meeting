@@ -10,19 +10,202 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (landingView) landingView.style.display = 'none';
         if (dashboardView) dashboardView.style.display = 'block';
 
-        await loadMeetings();
+        await Promise.all([loadFolders(), loadMeetings()]);
         setupUpload();
+        setupDragAndDrop();
     } else {
-        // 비로그인 상태: 랜딩 페이지 유지 (아무것도 하지 않음)
-        // common.js의 리다이렉트 로직이 있다면 그것을 무효화해야 할 수도 있음 (현재 common.js는 checkLoginStatus만 수행하고 자동 리다이렉트는 안 함)
+        // 비로그인 상태: 랜딩 페이지 유지
         if (landingView) landingView.style.display = 'block';
         if (dashboardView) dashboardView.style.display = 'none';
     }
 });
 
+let allMeetings = [];
+let currentFilter = 'all'; // 'all', 'unclassified', or folderId (int)
+
+async function loadFolders() {
+    try {
+        const token = localStorage.getItem('access_token');
+        const response = await fetch('/api/folders/', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+            const folders = await response.json();
+            renderFolders(folders);
+        }
+    } catch (e) {
+        console.error("Failed to load folders", e);
+    }
+}
+
+function renderFolders(folders) {
+    const list = document.getElementById('folder-list');
+    list.innerHTML = folders.map(folder => `
+        <div class="folder-item ${currentFilter === folder.id ? 'active' : ''}" 
+             ondrop="drop(event, ${folder.id})" ondragover="allowDrop(event)"
+             onclick="filterMeetings(${folder.id})">
+            <span><i class="fa-regular fa-folder" style="margin-right: 8px;"></i> ${folder.name}</span>
+            <div class="folder-actions" onclick="event.stopPropagation()">
+                <button class="folder-btn-sm" onclick="deleteFolder(${folder.id})" title="삭제"><i class="fa-solid fa-trash"></i></button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function createFolder() {
+    const name = prompt("새 폴더 이름을 입력하세요:");
+    if (!name) return;
+
+    const token = localStorage.getItem('access_token');
+    const res = await fetch('/api/folders/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ name })
+    });
+
+    if (res.ok) {
+        loadFolders();
+    } else {
+        alert("폴더 생성 실패");
+    }
+}
+
+async function deleteFolder(id) {
+    if (!confirm("폴더를 삭제하시겠습니까? (내용물은 유지됩니다)")) return;
+
+    const token = localStorage.getItem('access_token');
+    await fetch(`/api/folders/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+    loadFolders();
+    if (currentFilter === id) filterMeetings('all');
+}
+
+function filterMeetings(filter) {
+    currentFilter = filter;
+
+    // UI Active State Update
+    document.querySelectorAll('.menu-item, .folder-item').forEach(el => el.classList.remove('active'));
+
+    if (filter === 'all') {
+        document.querySelector('[data-filter="all"]').classList.add('active');
+        document.getElementById('page-title').innerHTML = '<i class="fa-solid fa-layer-group"></i> 전체 회의';
+    } else if (filter === 'unclassified') {
+        document.querySelector('[data-filter="unclassified"]').classList.add('active');
+        document.getElementById('page-title').innerHTML = '<i class="fa-regular fa-folder"></i> 미분류';
+    } else {
+        // Folder active state needs to be handled in renderFolders or re-render
+        renderFolders(document.querySelectorAll('.folder-item').length ? [] : []); // Re-render to update active class (simplified)
+        // Better: Find the element by text or ID in DOM. For now re-load folders is safe or just styling.
+        loadFolders(); // Re-fetch to apply 'active' class correctly in render
+    }
+
+    renderMeetingList(allMeetings);
+}
+
+// meeting.py에서 loadMeetings 수정 필요: 전역 변수 allMeetings에 저장
+async function loadMeetings() {
+    const list = document.getElementById('meeting-list');
+    list.innerHTML = '<div class="loading-state"><i class="fa-solid fa-circle-notch fa-spin"></i><p>불러오는 중...</p></div>';
+
+    try {
+        const token = localStorage.getItem('access_token');
+        const res = await fetch('/api/meeting/', {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (res.ok) {
+            allMeetings = await res.json();
+            renderMeetingList(allMeetings);
+        } else {
+            list.innerHTML = '<div class="empty-state"><p>회의 목록을 불러오지 못했습니다.</p></div>';
+        }
+    } catch (e) {
+        console.error(e);
+        list.innerHTML = '<div class="empty-state"><p>오류가 발생했습니다.</p></div>';
+    }
+}
+
+function renderMeetingList(meetings) {
+    const list = document.getElementById('meeting-list');
+    let filtered = meetings;
+
+    if (currentFilter !== 'all') {
+        if (currentFilter === 'unclassified') {
+            filtered = meetings.filter(m => !m.folder_id);
+        } else {
+            filtered = meetings.filter(m => m.folder_id === currentFilter);
+        }
+    }
+
+    if (filtered.length === 0) {
+        list.innerHTML = '<div class="empty-state"><p>이 폴더에 회의가 없습니다.</p></div>';
+        return;
+    }
+
+    list.innerHTML = filtered.map(meeting => `
+        <div class="meeting-card" draggable="true" ondragstart="drag(event, ${meeting.id})">
+            <button class="btn-delete" onclick="deleteMeeting(event, ${meeting.id})">
+                <i class="fa-solid fa-trash"></i>
+            </button>
+            <div onclick="location.href='/meeting/${meeting.id}'">
+                <div class="meeting-title">${meeting.title}</div>
+                <div class="meeting-date">${new Date(meeting.created_at).toLocaleString()}</div>
+                <span class="meeting-status status-${meeting.status}">
+                    ${meeting.status === 'completed' ? '완료' : (meeting.status === 'processing' ? '분석중' : '대기중')}
+                </span>
+            </div>
+        </div>
+    `).join('');
+}
+
+// Drag and Drop
+function allowDrop(ev) {
+    ev.preventDefault();
+}
+
+function drag(ev, meetingId) {
+    ev.dataTransfer.setData("meetingId", meetingId);
+}
+
+async function drop(ev, folderId) {
+    ev.preventDefault();
+    const meetingId = ev.dataTransfer.getData("meetingId");
+
+    // API Call to move meeting
+    const token = localStorage.getItem('access_token');
+    const res = await fetch(`/api/folders/${folderId}/meetings/${meetingId}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
+
+    if (res.ok) {
+        // Update local data
+        const meeting = allMeetings.find(m => m.id == meetingId);
+        if (meeting) meeting.folder_id = folderId;
+        renderMeetingList(allMeetings); // Refresh view
+    } else {
+        alert("이동 실패");
+    }
+}
+
+function setupDragAndDrop() {
+    // Drop zone for 'Unclassified'
+    const unclassifiedBtn = document.querySelector('[data-filter="unclassified"]');
+    if (unclassifiedBtn) {
+        unclassifiedBtn.ondragover = allowDrop;
+        unclassifiedBtn.ondrop = (ev) => drop(ev, 0); // 0 for unclassified
+    }
+}
+
 function setupUpload() {
     const fileInput = document.getElementById('file-input');
     const uploadBtn = document.getElementById('btn-upload');
+
 
     if (uploadBtn && fileInput) {
         uploadBtn.addEventListener('click', () => {
@@ -115,13 +298,19 @@ function renderMeetings(meetings) {
 
         const title = meeting.title || '제목 없는 회의';
 
+        // 이름 길이에 따라 글자 크기 조절
+        let fontSize = '1.2rem';
+        if (title.length > 30) fontSize = '0.9rem';
+        else if (title.length > 20) fontSize = '1.0rem';
+        else if (title.length > 12) fontSize = '1.1rem';
+
         return `
             <div class="meeting-card" onclick="location.href='/meeting/${meeting.id}'">
                 <button class="btn-delete" onclick="deleteMeeting(event, ${meeting.id})" title="회의 삭제">
                     <i class="fa-solid fa-trash"></i>
                 </button>
                 <div class="meeting-title" id="title-container-${meeting.id}" style="display:flex; align-items:center; gap:8px; min-height: 30px;">
-                    <span id="title-text-${meeting.id}">${title}</span>
+                    <span id="title-text-${meeting.id}" style="font-size: ${fontSize}">${title}</span>
                     <button class="btn-edit" id="btn-edit-${meeting.id}" onclick="enableEditMode(event, ${meeting.id})" title="이름 변경" style="background:none; border:none; cursor: pointer; color: #888; font-size: 0.9rem;">
                         <i class="fa-solid fa-pen"></i>
                     </button>
@@ -153,6 +342,8 @@ function enableEditMode(event, meetingId) {
     input.value = currentTitle;
     input.className = 'edit-title-input';
     input.style.width = '100%';
+    input.style.maxWidth = '100%'; // Prevent overflow
+    input.style.boxSizing = 'border-box'; // Include padding/border in width
     input.style.padding = '4px 8px';
     input.style.fontSize = '1rem';
     input.style.borderRadius = '4px';
