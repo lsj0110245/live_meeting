@@ -129,7 +129,13 @@ function seekAudio(time) {
 
 async function generateSummary() {
     const token = localStorage.getItem('access_token');
-    if (!confirm('AI 회의록 생성을 시작하시겠습니까?')) return;
+    if (!confirm('AI 회의록 생성을 시작하시겠습니까?\n(기존 요약이 있다면 덮어씌워집니다)')) return;
+
+    const btn = document.getElementById('btn-summary');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 요청 중...';
+    }
 
     try {
         const response = await fetch(`/api/meeting/${meetingId}/summarize`, {
@@ -138,12 +144,42 @@ async function generateSummary() {
         });
 
         if (response.ok) {
-            alert('요약 요청이 완료되었습니다. 잠시 후 새로고침해주세요.');
+            alert('요약 생성이 시작되었습니다.\n완료되면 화면이 자동으로 새로고침됩니다.');
+            // 3초 후 새로고침 (간단한 UX)
+            // 더 정교하게 하려면 폴링을 해야 하지만, 일단 요청 -> 대기 -> 완료 흐름이므로
+            // 사용자가 기다리면 됨. 혹은 dashboard 처럼 polling?
+            // 여기서는 일단 button을 "분석 중..."으로 바꾸고 
+            // 5초마다 상태를 체크하는 로직을 추가하는 것이 좋음.
+
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 분석 중...';
+
+            // Polling check
+            const checkInterval = setInterval(async () => {
+                const res = await fetch(`/api/meeting/${meetingId}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.status === 'completed') {
+                        clearInterval(checkInterval);
+                        window.location.reload();
+                    }
+                }
+            }, 3000);
+
         } else {
             alert('요청 실패');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> 회의록 생성';
+            }
         }
     } catch (err) {
         console.error(err);
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> 회의록 생성';
+        }
     }
 }
 

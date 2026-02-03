@@ -15,13 +15,24 @@ class STTService:
     async def transcribe_file_local(self, file_path: str, language: str = "ko", progress_callback=None) -> list | str:
         """
         Faster-Whisper를 사용하여 녹음 파일 전사 (GPU 최적화)
+        긴 파일은 자동으로 청킹 적용
         """
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Audio file not found: {file_path}")
 
         try:
-            # Faster-Whisper 사용 (이제 세그먼트 리스트 반환)
-            result = await faster_whisper_stt_service.transcribe_file(file_path, language, progress_callback)
+            # 파일 길이 체크 (60초 이상이면 청킹 적용)
+            from pydub import AudioSegment
+            audio = AudioSegment.from_file(file_path)
+            duration_sec = len(audio) / 1000.0
+            
+            if duration_sec > 60:
+                print(f"[긴 파일 감지] {duration_sec:.1f}초 - 청킹 모드 사용")
+                result = await faster_whisper_stt_service.transcribe_file_chunked(file_path, language, progress_callback)
+            else:
+                print(f"[일반 파일] {duration_sec:.1f}초 - 표준 모드 사용")
+                result = await faster_whisper_stt_service.transcribe_file(file_path, language, progress_callback)
+            
             return result
                     
         except Exception as e:

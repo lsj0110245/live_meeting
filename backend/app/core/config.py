@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     LOCAL_STT_URL: str = "http://localhost:9000"  # 레거시 호환용 (사용 안 함)
     
     # LLM 설정 (Ollama)
-    LLM_MODEL: str = "llama3"  # Ollama 모델명
+    LLM_MODEL: str = "llama3.1"  # Ollama 모델명
     LLM_MAX_TOKENS: int = 4096
     LLM_TEMPERATURE: float = 0.3  # LLM 온도 설정
     OLLAMA_BASE_URL: str = "http://llm:11434"  # Docker 내부 통신

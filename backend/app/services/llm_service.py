@@ -19,7 +19,9 @@ class LLMService:
         self.summary_prompt = ChatPromptTemplate.from_messages([
             ("system", """
             당신은 전문 회의록 작성 AI 비서입니다. 
-            주어진 회의 전사 텍스트를 분석하여 구조화된 JSON 데이터로 반환해야 합니다.
+            당신은 회의록 작성 전문가입니다. 한국어 회의 전사 텍스트를 입력받아 구조화된 요약을 생성하세요.
+            
+            **중요: 반드시 순수 한국어로만 작성하세요. 영어 단어를 절대 사용하지 마세요.**
             
             [분석 목표]
             1. 회의의 유형(meeting_type)을 추론하세요. (예: 주간보고, 아이디어 회의, 프로젝트 점검, 킥오프 등)
@@ -42,7 +44,11 @@ class LLMService:
                 }}
             }}
             
-            **반드시 위 JSON 형식으로만 응답하세요.** (Markdown 코드 블록 없이 순수 JSON만 출력)
+            **반드시 위 JSON 형식을 엄격히 준수하여 응답하세요.**
+            - Markdown 코드 블록(```json)을 사용하지 마세요. 
+            - 오직 순수 JSON 문자열만 출력하세요.
+            - "summary" 객체 내부의 키(purpose, content, conclusion, action_items)는 필수입니다.
+            - **모든 내용을 순수 한국어로만 작성하세요. 영어 단어 사용 금지.**
             """),
             ("user", """
             [기존 회의 제목]: {title}
@@ -69,7 +75,8 @@ class LLMService:
                 "transcript_text": transcript_text
             })
             
-            print("LLM 회의록 생성 완료 (Raw):", response_text[:100] + "...")
+            # [DEBUG] 원본 LLM 응답 로깅
+            print(f"[DEBUG] Raw LLM Response (first 500 chars): {response_text[:500] if response_text else 'EMPTY'}")
             
             # JSON 파싱
             try:
@@ -82,6 +89,17 @@ class LLMService:
                         cleaned_text = match.group(1).strip()
                 
                 result_json = json.loads(cleaned_text)
+                
+                # [구조 보정] 만약 root에 purpose, content 등이 있다면 summary로 이동
+                if "summary" not in result_json:
+                    # 혹시 root에 바로 필드들이 있는지 확인
+                    if "content" in result_json or "purpose" in result_json:
+                        print("LLM returned flat JSON. Wrapping in 'summary'.")
+                        result_json = {
+                            "metadata": result_json.get("metadata", {}),
+                            "summary": result_json
+                        }
+                
                 return result_json
                 
             except json.JSONDecodeError as e:
@@ -91,7 +109,7 @@ class LLMService:
                 return {
                     "metadata": {},
                     "summary": {
-                        "purpose": "요약 실패",
+                        "purpose": "요약 실패 (포맷 오류)",
                         "content": response_text, # 원본 텍스트라도 저장
                         "conclusion": "",
                         "action_items": ""

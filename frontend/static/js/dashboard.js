@@ -552,6 +552,16 @@ function renderMeetingList(meetings) {
             // console.log('Auto-refreshing meetings...');
             loadMeetings();
         }, 5000);
+
+        // [New] 1초마다 진행률 갱신 (애니메이션 효과)
+        if (window.progressInterval) clearInterval(window.progressInterval);
+        window.progressInterval = setInterval(updateProgressBars, 1000);
+    } else {
+        // 처리 중인 항목 없으면 타이머 해제
+        if (window.progressInterval) {
+            clearInterval(window.progressInterval);
+            window.progressInterval = null;
+        }
     }
 
     let finalHtml = filtered.map(meeting => {
@@ -608,6 +618,12 @@ function renderMeetingList(meetings) {
                 <span class="meeting-status ${statusInfo.class}">
                     <i class="fa-solid ${statusInfo.icon}"></i> ${statusInfo.text}
                 </span>
+                ${meeting.status === 'error' ? `
+                    <button class="btn btn-sm" onclick="retryAnalysis(event, ${meeting.id})" 
+                            style="margin-top: 8px; padding: 6px 12px; font-size: 0.85rem;">
+                        <i class="fa-solid fa-rotate-right"></i> 재분석
+                    </button>
+                ` : ''}
                 ${progressBarHtml}
             </div>
         </div>
@@ -1105,5 +1121,37 @@ async function deleteMeeting(event, meetingId) {
     } catch (err) {
         console.error(err);
         alert('삭제 중 오류가 발생했습니다.');
+    }
+}
+
+// 재분석 함수 (오류 발생 시 재시도)
+async function retryAnalysis(event, meetingId) {
+    event.stopPropagation(); // 카드 클릭 이벤트 방지
+
+    if (!confirm("이 회의를 다시 분석하시겠습니까?\n(기존 전사 데이터는 유지되며, STT 및 요약만 재실행됩니다)")) {
+        return;
+    }
+
+    try {
+        const token = localStorage.getItem('access_token');
+
+        // 상태를 processing으로 변경하고 백그라운드 작업 재시작
+        const response = await fetch(`/api/meeting/${meetingId}/retry`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (response.ok) {
+            alert('재분석이 시작되었습니다. 잠시 후 결과를 확인해주세요.');
+            await loadMeetings(); // 목록 갱신
+        } else {
+            const error = await response.json();
+            alert('재분석 실패: ' + (error.detail || '알 수 없는 오류'));
+        }
+    } catch (err) {
+        console.error(err);
+        alert('재분석 중 오류가 발생했습니다.');
     }
 }

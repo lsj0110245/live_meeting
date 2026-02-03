@@ -122,23 +122,37 @@
             <div class="dashboard-header">
                 <h1 id="page-title"><i class="fa-solid fa-folder-open"></i> 전체 회의</h1>
                 <div class="header-actions">
-                    <div id="bulk-actions" style="display: none; margin-right: 15px;">
-                        <span id="selected-count" style="margin-right: 10px; color: var(--text-sub);">0개 선택됨</span>
+                    <div id="bulk-actions"
+                        style="display: none; align-items: center; background: #f1f5f9; padding: 4px 12px; border-radius: 99px; margin-right: 15px; gap: 8px;">
+                        <span id="selected-count"
+                            style="font-size: 0.85rem; font-weight: 600; color: #475569; margin-right: 4px;">0개</span>
+
+                        <!-- 구분선 -->
+                        <div style="width: 1px; height: 16px; background: #cbd5e1; margin: 0 4px;"></div>
+
+                        <!-- 이동 드롭다운 -->
                         <div class="dropdown" style="display: inline-block;">
-                            <button class="btn btn-outline" style="font-size: 0.9rem;">
-                                <i class="fa-solid fa-folder-open"></i> 이동 <i class="fa-solid fa-chevron-down"></i>
+                            <button class="btn btn-sm btn-ghost"
+                                style="font-size: 0.9rem; padding: 4px 8px; color: #475569;" title="폴더 이동">
+                                <i class="fa-regular fa-folder"></i> <i class="fa-solid fa-chevron-down"
+                                    style="font-size: 0.7rem; margin-left: 4px;"></i>
                             </button>
-                            <div class="dropdown-content" id="move-to-dropdown" style="right: 0; left: auto;">
+                            <div class="dropdown-content" id="move-to-dropdown"
+                                style="right: auto; left: 0; min-width: 180px;">
                                 <!-- 폴더 목록 동적 생성 -->
                             </div>
                         </div>
-                        <button class="btn btn-outline" onclick="deleteSelectedMeetings()"
-                            style="font-size: 0.9rem; margin-left: 5px; color: #ef4444; border-color: #ef4444;">
-                            <i class="fa-solid fa-trash"></i> 삭제
+
+                        <!-- 목록에서 제거 (폴더 내에서만 표시) -->
+                        <button id="btn-remove-from-list" class="btn btn-sm btn-ghost" onclick="removeFromList()"
+                            style="font-size: 0.9rem; padding: 4px 8px; color: #f59e0b; display: none;" title="폴더에서 제외">
+                            <i class="fa-solid fa-minus"></i>
                         </button>
-                        <button id="btn-remove-from-list" class="btn btn-outline" onclick="removeFromList()"
-                            style="font-size: 0.9rem; margin-left: 5px; display: none;">
-                            <i class="fa-solid fa-minus"></i> 목록에서 제거
+
+                        <!-- 삭제 -->
+                        <button class="btn btn-sm btn-ghost" onclick="deleteSelectedMeetings()"
+                            style="font-size: 0.9rem; padding: 4px 8px; color: #ef4444;" title="영구 삭제">
+                            <i class="fa-regular fa-trash-can"></i>
                         </button>
                     </div>
                     <button id="btn-upload" class="btn btn-outline"><i class="fa-solid fa-cloud-arrow-up"></i> 파일

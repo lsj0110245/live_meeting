@@ -52,9 +52,10 @@ class FasterWhisperSTTService:
                 file_path,
                 language=language,
                 beam_size=5,  # 정확도 우선
+                initial_prompt="이것은 비즈니스 회의 녹음입니다. 자연스러운 한국어로 전사해주세요.", # 문맥 가이드 추가
                 vad_filter=True,  # 음성 구간 자동 감지
                 vad_parameters=dict(
-                    min_silence_duration_ms=500,
+                    min_silence_duration_ms=1000, # 침묵 감지 기준 상향 (500 -> 1000)
                     speech_pad_ms=400
                 )
             )
@@ -127,6 +128,120 @@ class FasterWhisperSTTService:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
     
+    async def transcribe_file_chunked(self, file_path: str, language: str = "ko", progress_callback=None) -> list:
+        """
+        녹음 파일 전사 (오버래핑 청킹 적용) - 긴 파일 처리용
+        10초 청크, 2초 오버랩
+        """
+        print(f"[청킹 전사 시작] {file_path}")
+        self._initialize_model()
+        
+        try:
+            from pydub import AudioSegment
+            import tempfile
+            import os
+            
+            # 오디오 파일 로드
+            audio = AudioSegment.from_file(file_path)
+            total_duration_ms = len(audio)
+            total_duration_sec = total_duration_ms / 1000.0
+            print(f"오디오 길이: {total_duration_sec:.2f}초")
+            
+            # 청킹 설정
+            CHUNK_LENGTH_MS = 10000  # 10초
+            OVERLAP_MS = 2000        # 2초 오버랩
+            STEP_MS = CHUNK_LENGTH_MS - OVERLAP_MS  # 8초씩 이동
+            
+            all_segments = []
+            chunk_count = 0
+            
+            # 청크별 처리
+            for start_ms in range(0, total_duration_ms, STEP_MS):
+                end_ms = min(start_ms + CHUNK_LENGTH_MS, total_duration_ms)
+                chunk = audio[start_ms:end_ms]
+                chunk_count += 1
+                
+                # 임시 파일로 저장
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                    temp_path = temp_file.name
+                    chunk.export(temp_path, format="wav")
+                
+                try:
+                    # Whisper 전사
+                    segments, info = self.model.transcribe(
+                        temp_path,
+                        language=language,
+                        beam_size=5,
+                        initial_prompt="이것은 비즈니스 회의 녹음입니다. 자연스러운 한국어로 전사해주세요.",
+                        vad_filter=True,
+                        vad_parameters=dict(
+                            min_silence_duration_ms=1000,
+                            speech_pad_ms=400
+                        )
+                    )
+                    
+                    # 세그먼트 수집 (시간 오프셋 보정)
+                    offset_sec = start_ms / 1000.0
+                    for segment in segments:
+                        adjusted_segment = {
+                            "start": segment.start + offset_sec,
+                            "end": segment.end + offset_sec,
+                            "text": segment.text.strip()
+                        }
+                        all_segments.append(adjusted_segment)
+                        
+                finally:
+                    # 임시 파일 삭제
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                
+                # 진행률 업데이트
+                if progress_callback:
+                    percent = int((end_ms / total_duration_ms) * 100)
+                    progress_callback(percent)
+                
+                print(f"  청크 {chunk_count} 처리 완료 ({start_ms/1000:.1f}s ~ {end_ms/1000:.1f}s)")
+            
+            # 중복 제거 (오버랩 구간)
+            result_segments = self._merge_overlapping_segments(all_segments)
+            
+            print(f"청킹 전사 완료: 총 {len(result_segments)}개 세그먼트")
+            return result_segments
+            
+        except Exception as e:
+            print(f"청킹 전사 오류: {str(e)}")
+            raise e
+    
+    def _merge_overlapping_segments(self, segments: list) -> list:
+        """
+        오버랩 구간의 중복 세그먼트 병합
+        """
+        if not segments:
+            return []
+        
+        # 시작 시간 기준 정렬
+        sorted_segments = sorted(segments, key=lambda x: x["start"])
+        
+        merged = []
+        current = sorted_segments[0].copy()
+        
+        for next_seg in sorted_segments[1:]:
+            # 오버랩 체크 (현재 세그먼트 끝 시간 > 다음 세그먼트 시작 시간)
+            if current["end"] > next_seg["start"]:
+                # 중복 구간: 텍스트가 비슷하면 스킵, 다르면 병합
+                if next_seg["text"] not in current["text"]:
+                    current["text"] += " " + next_seg["text"]
+                current["end"] = max(current["end"], next_seg["end"])
+            else:
+                # 겹치지 않음: 현재 세그먼트 저장하고 다음으로 이동
+                merged.append(current)
+                current = next_seg.copy()
+        
+        # 마지막 세그먼트 추가
+        merged.append(current)
+        
+        return merged
+
     def cleanup(self):
         """GPU 메모리 정리"""
         if self.model is not None:

@@ -19,11 +19,21 @@ async def process_meeting_summary(meeting_id: int):
             return
 
         # 전사 텍스트 합치기
-        full_text = "\\n".join([f"{t.speaker}: {t.text}" for t in transcripts])
+        full_text = "\n".join([f"{t.speaker}: {t.text}" for t in transcripts])
         
-        # 2. LLM 요약 생성 (JSON 반환)
-        print(f"회의록 생성 중... 회의 ID: {meeting_id}")
-        summary_data = await llm_service.generate_summary(meeting.title, full_text)
+        # 2. LLM 요약 생성 (Llama 3.1 - 128k Context)
+        print(f"회의록 생성 중... 회의 ID: {meeting_id}, 텍스트 길이: {len(full_text)}자")
+        
+        # [안전장치] 128k 토큰(약 30만자)을 넘을 수도 있으므로 안전하게 10만자 기준으로 분기
+        # 대부분은 통짜 처리가 정확도가 높음. 아주 긴 경우만 청킹.
+        SAFETY_LIMIT = 100000 
+        
+        if len(full_text) > SAFETY_LIMIT:
+             print(f"[Safe Mode] 텍스트가 매우 깁니다({len(full_text)}자). 안전을 위해 Map-Reduce 전략 적용")
+             summary_data = await _generate_summary_with_chunking(meeting.title, full_text)
+        else:
+             # 긴 컨텍스트 모델 사용으로 청킹 없이 전체 처리 (정확도 최상)
+             summary_data = await llm_service.generate_summary(meeting.title, full_text)
         
         if not summary_data:
             print(f"LLM 응답 없음. 회의 ID: {meeting_id}")
@@ -63,7 +73,13 @@ async def process_meeting_summary(meeting_id: int):
 
         # 4. 요약 결과 저장 (Summary) - Markdown 변환
         summ = summary_data.get("summary", {})
-        
+
+        if not summ.get('content') or summ.get('purpose') == "내용 없음":
+            # [Fallback] 요약이 비어있으면 원본 텍스트 일부를 넣어서 사용자에게 보여줌
+            preview_text = full_text[:500] + "..." if len(full_text) > 500 else full_text
+            summ['content'] = f"⚠️ 요약 내용이 생성되지 않았습니다. 원본 텍스트 미리보기:\n\n{preview_text}"
+            summ['purpose'] = "요약 실패 (원문 표시 중)"
+
         markdown_content = f"""# {meeting.title} 회의록
 
 ## 📅 요약
@@ -97,7 +113,51 @@ async def process_meeting_summary(meeting_id: int):
         db.commit()
         print(f"회의록 생성 완료. 회의 ID: {meeting_id}")
         
+        # 상태 업데이트 (completed)
+        # 단순히 여기에서 completed로 바꾸면, upload.py의 흐름과 겹칠 수 있으나
+        # upload.py는 이미 completed 상태에서 이 함수를 호출함.
+        # 따라서 수동 호출(processing 상태)인 경우에만 유효함.
+        if meeting.status == "processing":
+            meeting.status = "completed"
+            db.commit()
+        
     except Exception as e:
         print(f"회의록 생성 실패. 회의 ID: {meeting_id}, 오류: {str(e)}")
     finally:
         db.close()
+
+
+async def _generate_summary_with_chunking(title: str, full_text: str) -> dict:
+    """
+    긴 텍스트를 청킹하여 Map-Reduce 방식으로 요약 생성
+    """
+    from app.services.llm_service import llm_service
+    
+    # 청킹 설정
+    CHUNK_SIZE = 3000  # 3000자 청크
+    OVERLAP = 500      # 500자 오버랩
+    
+    # 텍스트 청킹
+    chunks = []
+    start = 0
+    while start < len(full_text):
+        end = start + CHUNK_SIZE
+        chunks.append(full_text[start:end])
+        start += (CHUNK_SIZE - OVERLAP)
+    
+    print(f"  총 {len(chunks)}개 청크로 분할")
+    
+    # Step 1: Map - 각 청크 요약
+    partial_summaries = []
+    for i, chunk in enumerate(chunks):
+        print(f"  청크 {i+1}/{len(chunks)} 요약 중...")
+        summary_text = await llm_service.generate_simple_summary(chunk)
+        if summary_text:
+            partial_summaries.append(summary_text)
+    
+    # Step 2: Reduce - 통합 요약
+    combined_text = "\n\n".join(partial_summaries)
+    print(f"  부분 요약 통합 중... (총 {len(combined_text)}자)")
+    
+    final_summary = await llm_service.generate_summary(title, combined_text)
+    return final_summary

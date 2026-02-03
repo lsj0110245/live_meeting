@@ -10,6 +10,7 @@ from app.schemas.meeting import Meeting as MeetingSchema, MeetingCreate, Meeting
 from app.services.llm_service import llm_service
 from typing import Any, List
 import asyncio
+import os
 
 router = APIRouter()
 
@@ -100,9 +101,44 @@ def generate_summary(
         raise HTTPException(status_code=400, detail="권한이 없습니다.")
         
     # Background Task로 LLM 서비스 호출 (Llama 3)
+    meeting.status = "processing"
+    db.commit()
+    
     background_tasks.add_task(process_meeting_summary, meeting.id)
     
     return {"message": "회의록 생성이 요청되었습니다. 잠시 후 확인해주세요."}
+
+
+@router.post("/{meeting_id}/retry")
+def retry_analysis(
+    meeting_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    회의 재분석 요청 (오류 발생 시)
+    - 오디오 파일을 다시 STT 처리하고 요약 생성
+    """
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="회의를 찾을 수 없습니다.")
+    if meeting.owner_id != current_user.id:
+        raise HTTPException(status_code=400, detail="권한이 없습니다.")
+    
+    # 오디오 파일 존재 확인
+    if not meeting.audio_file_path or not os.path.exists(meeting.audio_file_path):
+        raise HTTPException(status_code=400, detail="오디오 파일을 찾을 수 없습니다.")
+    
+    # 상태를 processing으로 변경
+    meeting.status = "processing"
+    db.commit()
+    
+    # 백그라운드 작업 재시작 (upload.py의 process_audio_file 재사용)
+    from app.api.endpoints.upload import process_audio_file
+    background_tasks.add_task(process_audio_file, meeting.id, meeting.audio_file_path)
+    
+    return {"message": "재분석이 시작되었습니다. 잠시 후 확인해주세요."}
 
 
 @router.put("/{meeting_id}", response_model=MeetingSchema)

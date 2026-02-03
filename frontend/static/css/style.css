@@ -981,3 +981,27 @@ input:focus {
    
    But first, let's check `common.js` to see where to put the logic.
 */
+
+/* Utility: Ghost Button (Transparent) */
+.btn-ghost {
+    background: transparent;
+    border: none;
+    color: var(--text-sub);
+    transition: all 0.2s;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-ghost:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: var(--primary);
+}
+
+/* Dark mode adjustment */
+@media (prefers-color-scheme: dark) {
+    .btn-ghost:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+}
