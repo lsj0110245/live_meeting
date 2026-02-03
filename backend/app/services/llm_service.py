@@ -102,4 +102,34 @@ class LLMService:
             print(f"LLM Generation Error: {str(e)}")
             return None
 
+    async def generate_simple_summary(self, text: str) -> str:
+        """
+        단문 요약 생성 (중간 요약용) - 일반 텍스트 반환
+        """
+        try:
+            # invoke uses the configured model (default format is json in __init__)
+            # 임시로 format 해제는 불가하므로 JSON으로 유도 후 content 추출
+            
+            prompt = f"""
+다음 회의 내용을 3줄 이내로 핵심만 요약해줘.
+결과는 JSON 형식으로 반환해.
+포맷: {{ "summary": "요약 내용..." }}
+
+[회의 내용]
+{text}
+"""
+            response = await self.llm.ainvoke(prompt)
+            content = response.content
+            
+            import json
+            try:
+                data = json.loads(content)
+                return data.get("summary", content)
+            except:
+                return content
+                
+        except Exception as e:
+            print(f"Simple Summary Error: {str(e)}")
+            return "요약 생성 실패"
+
 llm_service = LLMService()

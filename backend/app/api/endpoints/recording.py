@@ -11,6 +11,8 @@ from app.db.session import get_db
 from app.api import deps
 from app.models.user import User
 from app.services.stt_service import stt_service
+from app.services.llm_service import llm_service
+import time
 
 router = APIRouter()
 
@@ -25,6 +27,8 @@ class RealtimeSession:
         self.transcript_history: List[str] = []
         self.metadata = None  # 회의 메타데이터 저장
         self.meeting_id = None  # 생성된 Meeting ID
+        self.last_summary_time = time.time() # 마지막 요약 시간
+        self.transcript_since_last_summary: List[str] = [] # 마지막 요약 이후 쌓인 텍스트
         
     def add_audio_chunk(self, chunk: bytes, chunk_duration: float = 0.5):
         """오디오 청크 추가"""
@@ -42,6 +46,13 @@ class RealtimeSession:
         """전사 결과 기록"""
         if text.strip():
             self.transcript_history.append(text)
+            self.transcript_since_last_summary.append(text)
+    
+    def get_recent_transcript_and_reset(self) -> str:
+        """최근(마지막 요약 이후) 전사 결과 반환 및 초기화"""
+        text = " ".join(self.transcript_since_last_summary)
+        self.transcript_since_last_summary = []
+        return text
     
     def get_full_transcript(self) -> str:
         """전체 전사 결과 반환"""
@@ -203,9 +214,27 @@ async def websocket_endpoint(
                     else:
                         # 버퍼링 중 상태 알림
                         await manager.send_json(client_id, {
-                            "type": "buffering",
                             "buffer_seconds": session.buffer_duration
                         })
+
+                    # --- 중간 요약 트리거 (5분마다) ---
+                    current_time = time.time()
+                    if current_time - session.last_summary_time >= 300: # 300초 = 5분
+                        recent_text = session.get_recent_transcript_and_reset()
+                        
+                        if recent_text.strip():
+                            # LLM 요약 요청 (비동기)
+                            summary = await llm_service.generate_simple_summary(recent_text)
+                            
+                            # 클라이언트에 전송
+                            await manager.send_json(client_id, {
+                                "type": "intermediate_summary",
+                                "content": summary
+                            })
+                            
+                            # TODO: DB 저장 로직 추가 가능 (IntermediateSummary 모델 등)
+                        
+                        session.last_summary_time = current_time
                         
             except json.JSONDecodeError:
                 # JSON 파싱 실패 - 오디오 데이터로 간주

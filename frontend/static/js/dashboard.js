@@ -444,7 +444,7 @@ async function deleteSelectedMeetings() {
     if (selectedMeetingIds.size === 0) return;
 
     const ids = Array.from(selectedMeetingIds);
-    if (!confirm(`선택한 ${ids.length}개의 회의를 삭제하시겠습니까?\n삭제된 데이터는 복구할 수 없습니다.`)) return;
+    if (!confirm(`선택한 ${ids.length}개의 회의를 삭제하시겠습니까?`)) return;
 
     try {
         const token = localStorage.getItem('access_token');
@@ -554,7 +554,7 @@ function renderMeetingList(meetings) {
         }, 5000);
     }
 
-    list.innerHTML = filtered.map(meeting => {
+    let finalHtml = filtered.map(meeting => {
         const isSelected = selectedMeetingIds.has(meeting.id);
 
         const date = new Date(meeting.created_at).toLocaleString();
@@ -612,6 +612,41 @@ function renderMeetingList(meetings) {
             </div>
         </div>
     `}).join('');
+
+    // 만약 업로드 중이라면 임시 카드 추가
+    if (window.uploadingFileState) {
+        const u = window.uploadingFileState;
+        const tempCard = `
+        <div class="meeting-card selected" style="border: 2px solid #3b82f6; background-color: rgba(59, 130, 246, 0.05);">
+            <div style="position: absolute; top: 10px; right: 10px; z-index: 10;">
+                <i class="fa-solid fa-cloud-arrow-up" style="color:#3b82f6"></i>
+            </div>
+            <div style="margin-left: 30px; margin-top: 5px;">
+                <div class="meeting-title" style="display:flex; align-items:center; gap:8px;">
+                     <span style="font-size: 1.1rem; font-weight:bold;">${u.title}</span>
+                </div>
+                <div class="meeting-date"><i class="fa-regular fa-clock"></i> ${new Date().toLocaleString()}</div>
+                <span class="meeting-status status-processing">
+                    <i class="fa-solid fa-upload"></i> 업로드 중...
+                </span>
+                
+                <div class="progress-wrapper" style="margin-top:8px; width: 100%;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                        <span style="font-size:0.75rem; color:#94a3b8;">${u.filename}</span>
+                        <span id="upload-progress-text" style="font-size:0.75rem; color:#3b82f6; font-weight:bold;">${u.percent}%</span>
+                    </div>
+                    <div class="progress-bar-bg" style="background:#334155; height:4px; border-radius:2px; overflow:hidden;">
+                        <div id="upload-progress-bar" style="width:${u.percent}%; height:100%; background:#3b82f6; transition:width 0.1s linear;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+        // 리스트 최상단에 추가
+        finalHtml = tempCard + finalHtml;
+    }
+
+    list.innerHTML = finalHtml;
 }
 
 async function updateProgressBars() {
@@ -844,8 +879,15 @@ async function uploadFileWithMetadata(metadata) {
     formData.append('attendees', metadata.attendees);
     formData.append('writer', metadata.writer);
 
-    // Show Progress Overlay
-    showProgress(`'${file.name}' 업로드 중...`, 0);
+    // [전역 상태 설정] 업로드 중 상태 시작
+    window.uploadingFileState = {
+        title: metadata.title,
+        filename: file.name,
+        percent: 0
+    };
+
+    // UI 즉시 갱신 (임시 카드 표시)
+    renderMeetingList(allMeetings);
 
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
@@ -856,16 +898,30 @@ async function uploadFileWithMetadata(metadata) {
         xhr.upload.onprogress = function (e) {
             if (e.lengthComputable) {
                 const percentComplete = (e.loaded / e.total) * 100;
-                updateProgress(percentComplete);
+
+                // 전역 상태 업데이트
+                if (window.uploadingFileState) {
+                    window.uploadingFileState.percent = Math.round(percentComplete);
+
+                    // DOM바만 직접 조작 (전체 렌더링은 비효율적이므로)
+                    const bar = document.getElementById('upload-progress-bar');
+                    const text = document.getElementById('upload-progress-text');
+                    if (bar && text) {
+                        bar.style.width = window.uploadingFileState.percent + '%';
+                        text.innerText = window.uploadingFileState.percent + '%';
+                    }
+                }
             }
         };
 
         // Completion
         xhr.onload = async function () {
-            hideLoading();
+            // 업로드 상태 해제
+            window.uploadingFileState = null;
+
             if (xhr.status >= 200 && xhr.status < 300) {
-                alert('업로드 완료! AI 분석이 시작되었습니다.');
-                await loadMeetings(); // 목록 갱신
+                // 성공 시 목록 갱신 (임시 카드는 사라지고 실제 카드가 'processing' 상태로 등장)
+                await loadMeetings();
 
                 // Reset inputs
                 const fileInput = document.getElementById('file-input');
@@ -880,13 +936,17 @@ async function uploadFileWithMetadata(metadata) {
                 } catch (e) { console.error(e); }
 
                 alert('실패: ' + errorMessage);
-                resolve(); // Resolve even on error to cleanup? Or reject? Alert handled, so resolve.
+                // 실패했으니 임시 카드 제거를 위해 다시 렌더링
+                renderMeetingList(allMeetings);
+                resolve();
             }
         };
 
         // Error
         xhr.onerror = function () {
-            hideLoading();
+            window.uploadingFileState = null;
+            renderMeetingList(allMeetings);
+
             alert('네트워크 오류로 업로드에 실패했습니다.');
             console.error('Upload network error');
             resolve();
@@ -1022,7 +1082,7 @@ async function saveMeetingTitle(meetingId, newTitle, originalTitle) {
 async function deleteMeeting(event, meetingId) {
     event.stopPropagation(); // 카드 클릭 이벤트 전파 방지
 
-    if (!confirm("정말 이 회의를 삭제하시겠습니까?\\n삭제된 데이터는 복구할 수 없습니다.")) {
+    if (!confirm("이 회의를 삭제하시겠습니까?")) {
         return;
     }
 

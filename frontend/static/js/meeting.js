@@ -57,6 +57,11 @@ async function loadMeetingDetails() {
                 player.addEventListener('loadedmetadata', () => {
                     console.log("Audio Metadata Loaded. Duration:", player.duration);
                 });
+
+                // 타임 업데이트 리스너 추가 (싱크 하이라이팅)
+                player.addEventListener('timeupdate', () => {
+                    highlightCurrentTranscript(player.currentTime);
+                });
             }
         }
 
@@ -75,6 +80,8 @@ async function loadMeetingDetails() {
 
                     const item = document.createElement('div');
                     item.className = 'transcript-item';
+                    item.dataset.startTime = t.start_time; // 시작 시간 저장
+                    item.dataset.endTime = t.end_time; // 종료 시간 저장
                     item.style.cursor = 'pointer';
                     item.onclick = () => seekAudio(t.start_time);
 
@@ -287,7 +294,51 @@ function exportMeeting(format) {
     showMetadataModal(format);
 }
 
-// 전역 스코프로 노출 (HTML onclick에서 사용)
+
+// 현재 재생 위치에 맞는 전사 하이라이트
+function highlightCurrentTranscript(currentTime) {
+    const items = document.querySelectorAll('.transcript-item');
+    items.forEach(item => {
+        const start = parseFloat(item.dataset.startTime);
+        const end = parseFloat(item.dataset.endTime) || (start + 5); // end가 없으면 대략 5초로 가정
+
+        if (currentTime >= start && currentTime < end) {
+            // 현재 활성화된 아이템 찾기
+            const currentActive = document.querySelector('.transcript-item.active-transcript');
+
+            // 이미 활성화된 아이템이 지금 아이템과 같으면 스킵 (불필요한 DOM 조작 방지)
+            if (currentActive === item) return;
+
+            // 다른 활성화된 아이템 끄기
+            if (currentActive) {
+                currentActive.classList.remove('active-transcript');
+            }
+
+            // 현재 아이템 활성화
+            item.classList.add('active-transcript');
+
+            // 스크롤 이동 (부드럽게, 중앙 정렬)
+            item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    });
+}
+
+// 스타일 추가
+const style = document.createElement('style');
+style.textContent = `
+    .transcript-item.active-transcript {
+        background-color: rgba(59, 130, 246, 0.1);
+        border-left: 3px solid #3b82f6;
+        padding-left: 12px; /* 기존 패딩 + 보더 공간 */
+    }
+    .transcript-item {
+        transition: all 0.2s ease;
+        padding: 5px;
+        border-radius: 4px;
+    }
+`;
+document.head.appendChild(style);
+
 window.exportMeeting = exportMeeting;
 window.closeMetadataModal = closeMetadataModal;
 window.submitMetadataAndExport = submitMetadataAndExport;

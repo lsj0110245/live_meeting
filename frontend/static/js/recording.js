@@ -90,6 +90,11 @@ function handleWebSocketMessage(data) {
             bufferText.textContent = '버퍼링: 0/5초';
             break;
 
+        case 'intermediate_summary':
+            // 중간 요약 수신
+            appendIntermediateSummary(data.content);
+            break;
+
         case 'error':
             console.error('서버 에러:', data.message);
             break;
@@ -395,6 +400,34 @@ function saveTranscript() {
     alert('저장 기능은 추후 구현 예정입니다.');
 }
 
+/**
+ * 중간 요약 추가
+ */
+function appendIntermediateSummary(content) {
+    const timelineSection = document.getElementById('summary-timeline-section');
+    const timelineContent = document.getElementById('summary-timeline-content');
+
+    // 섹션 표시
+    timelineSection.style.display = 'block';
+
+    // 현재 시간 (타임스탬프)
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    // 카드 생성
+    const card = document.createElement('div');
+    card.className = 'summary-card';
+    card.style.animation = 'slideIn 0.5s';
+
+    card.innerHTML = `
+        <div class="summary-time"><i class="fa-regular fa-clock"></i> ${timeStr}</div>
+        <div class="summary-text">${content}</div>
+    `;
+
+    // 최신 요약이 위로 오도록 prepend
+    timelineContent.prepend(card);
+}
+
 // 페이지 로드 시 WebSocket 연결
 document.addEventListener('DOMContentLoaded', function () {
     // 로그인 확인
@@ -427,6 +460,50 @@ style.textContent = `
     }
     .transcript-segment {
         padding: 2px 0;
+    }
+
+    @keyframes slideIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    .summary-timeline-box {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 30px;
+        border-left: 5px solid #3b82f6;
+    }
+
+    .timeline-container {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        max-height: 300px;
+        overflow-y: auto;
+        padding-right: 5px;
+    }
+
+    .summary-card {
+        background: var(--bg-dark);
+        border-radius: 8px;
+        padding: 15px;
+        border: 1px solid var(--border);
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+
+    .summary-time {
+        font-size: 0.85rem;
+        color: #3b82f6;
+        margin-bottom: 5px;
+        font-weight: bold;
+    }
+
+    .summary-text {
+        font-size: 0.95rem;
+        line-height: 1.6;
+        color: var(--text-primary);
     }
 `;
 document.head.appendChild(style);

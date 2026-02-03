@@ -108,11 +108,11 @@ class FasterWhisperSTTService:
             segments, info = self.model.transcribe(
                 temp_path,
                 language=language,
-                beam_size=1,  # 속도 우선
+                beam_size=5,  # 정확도 향상 (기본 1 -> 5)
                 vad_filter=True,
                 vad_parameters=dict(
-                    min_silence_duration_ms=300,
-                    speech_pad_ms=200
+                    min_silence_duration_ms=500, # 노이즈 필터링 강화
+                    speech_pad_ms=400
                 )
             )
             

@@ -121,8 +121,72 @@ def update_meeting(
     if meeting.owner_id != current_user.id:
         raise HTTPException(status_code=400, detail="권한이 없습니다.")
 
-    if meeting_in.title is not None:
+    if meeting_in.title is not None and meeting_in.title != meeting.title:
+        # 파일명도 변경 (사용자 요청)
+        if meeting.audio_file_path:
+            import os
+            from app.utils import get_unique_filename # 재사용하거나 새로 정의 필요. 일단 간단히 구현
+            
+            # 절대 경로 보정 (Docker path vs Local path issue handling)
+            # audio_file_path가 절대경로가 아닐 수 있음 (/app/media/...)
+            old_path = meeting.audio_file_path
+            
+            # 컨테이너 내부 경로 가정 (/app/)
+            # 하지만 여기서 os.path.isabs 체크 후 작업
+            # 개발환경이 윈도우라면 c:\... 일 수도 있음.
+            # 가장 안전한 건 os.path.exists로 확인되면 진행.
+            
+            # 1. 파일 존재 확인
+            if not os.path.exists(old_path):
+                 # 만약 상대경로라면? (media/...)
+                 potential_path = os.path.join(os.getcwd(), old_path) 
+                 if os.path.exists(potential_path):
+                     old_path = potential_path
+            
+            if os.path.exists(old_path):
+                # 2. 새 파일명 생성
+                import re
+                dir_name = os.path.dirname(old_path)
+                file_ext = os.path.splitext(old_path)[1]
+                
+                # 안전한 파일명 생성
+                safe_title = re.sub(r'[\\/*?:"<>|]', "", meeting_in.title)
+                safe_title = safe_title.replace(" ", "_")
+                new_filename = f"{safe_title}{file_ext}"
+                new_path = os.path.join(dir_name, new_filename)
+                
+                # 3. 이름 충돌 처리 (숫자 붙이기)
+                counter = 1
+                base_new_path = new_path
+                while os.path.exists(new_path) and new_path != old_path:
+                    new_path = os.path.join(dir_name, f"{safe_title}_{counter}{file_ext}")
+                    counter += 1
+                
+                # 4. 파일명 변경 및 DB 업데이트
+                try:
+                    os.rename(old_path, new_path)
+                    print(f"Renamed file: {old_path} -> {new_path}")
+                    
+                    # DB에는 다시 상대 경로로 저장해야 할 수도 있음.
+                    # 기존 path가 'media/xxx.mp3' 였다면 새 path도 'media/new_xxx.mp3' 여야 함.
+                    
+                    # 원래 DB 값이 상대 경로였는지 체크
+                    if not os.path.isabs(meeting.audio_file_path):
+                        # old_path는 절대경로로 변환되었을 수 있음.
+                        # new_path에서 working dir 부분을 떼어내거나, 그냥 new_filename만 남기고
+                        # 기존 directory prefix를 붙여야 함.
+                        
+                        prefix = os.path.dirname(meeting.audio_file_path)
+                        meeting.audio_file_path = os.path.join(prefix, os.path.basename(new_path)).replace("\\", "/")
+                    else:
+                        meeting.audio_file_path = new_path
+                        
+                except OSError as e:
+                    print(f"File rename failed: {e}")
+                    # 실패해도 DB 타이틀은 변경 허용 (Silent Fail or Log)
+        
         meeting.title = meeting_in.title
+
     if meeting_in.description is not None:
         meeting.description = meeting_in.description
     if meeting_in.meeting_type is not None:
