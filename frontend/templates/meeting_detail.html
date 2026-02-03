@@ -14,6 +14,7 @@
         <div class="card meeting-info">
             <h1 id="meeting-title">Loading...</h1>
             <p id="meeting-date" class="date-text"></p>
+            <p id="meeting-duration" class="duration-text" style="color: #666; margin-bottom: 10px;"></p>
             <p id="meeting-desc" class="desc-text"></p>
 
             <div class="actions">
@@ -40,6 +41,8 @@
     <div class="right-panel">
         <div class="card player-card">
             <audio id="audio-player" controls style="width: 100%;"></audio>
+            <div id="player-total-duration"
+                style="text-align: right; font-size: 0.85rem; color: #666; margin-top: 5px;"></div>
         </div>
 
         <div class="card transcript-card">

@@ -9,9 +9,9 @@ let websocket = null;
 let mediaRecorder = null;
 let audioChunks = [];
 let isRecording = false;
-let recordingTimer = null;
 let recordingSeconds = 0;
 let fullTranscript = "";
+let currentMeetingId = null; // 현재 녹음 중인 회의 ID
 
 // DOM 요소
 const statusDot = document.querySelector('.status-dot');
@@ -98,6 +98,11 @@ function handleWebSocketMessage(data) {
         case 'error':
             console.error('서버 에러:', data.message);
             break;
+
+        case 'meeting_created':
+            currentMeetingId = data.meeting_id;
+            console.log('회의 생성됨 ID:', currentMeetingId);
+            break;
     }
 }
 
@@ -115,7 +120,39 @@ function updateStatus(status, text) {
 let meetingMetadata = null;
 
 function startRecording() {
-    showMetadataModal('recording');
+    // 메타데이터 입력 없이 바로 녹음 시작 (기본값 사용)
+    startRecordingImmediate();
+}
+
+
+/**
+ * 즉시 녹음 시작 (기본 메타데이터 사용)
+ */
+function startRecordingImmediate() {
+    // 즉시 녹음 시작 (기본 메타데이터 사용)
+    currentMeetingId = null; // 초기화
+
+    const now = new Date();
+
+    // 기본 메타데이터 생성
+    // YYYY-MM-DDTHH:mm 형식
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const formattedDate = `${year}-${month}-${day}T${hours}:${minutes}`;
+
+    // 기본 메타데이터 생성
+    meetingMetadata = {
+        title: `실시간 회의 ${year}-${month}-${day} ${hours}:${minutes}`,
+        meeting_type: "실시간 녹음",
+        meeting_date: formattedDate,
+        attendees: "",
+        writer: ""
+    };
+
+    startRecordingWithMetadata();
 }
 
 /**
@@ -185,7 +222,9 @@ function submitMetadata() {
         meeting_type: document.getElementById('meeting-type-input').value.trim(),
         meeting_date: document.getElementById('meeting-date-input').value,
         attendees: document.getElementById('meeting-attendees-input').value.trim(),
-        writer: document.getElementById('meeting-writer-input').value.trim()
+        writer: document.getElementById('meeting-writer-input').value.trim(),
+        status: 'completed', // 녹음 완료 상태로 명시
+        duration: recordingSeconds // 녹음 시간 전송
     };
 
     // 모달 닫기
@@ -193,13 +232,67 @@ function submitMetadata() {
 
     // 편집 모드인 경우 저장 후 대시보드로 이동
     if (window.isEditMode) {
-        alert('회의 정보가 업데이트되었습니다.');
-        window.location.href = '/';
-        window.isEditMode = false;
+        if (!currentMeetingId) {
+            alert('회의 ID를 찾을 수 없어 저장에 실패했습니다.');
+            window.location.href = '/';
+            return;
+        }
+
+        const token = localStorage.getItem('access_token');
+        fetch(`/api/meeting/${currentMeetingId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(meetingMetadata)
+        })
+            .then(response => {
+                if (response.ok) {
+                    alert('회의 정보가 업데이트되었습니다.');
+                    window.location.href = '/';
+                    window.isEditMode = false;
+                } else {
+                    alert('회의 정보 업데이트 실패');
+                    console.error('Update failed:', response);
+                }
+            })
+            .catch(err => {
+                console.error('Network error:', err);
+                alert('저장 중 오류가 발생했습니다.');
+            });
     } else {
         // 실제 녹음 시작
         startRecordingWithMetadata();
     }
+}
+
+/**
+ * 메타데이터와 함께 실제 녹음 시작
+ */
+/**
+ * WebSocket 연결 대기 (Promise wrapper)
+ */
+function waitForConnection(ws, timeout = 10000) {
+    return new Promise((resolve, reject) => {
+        if (!ws) return reject(new Error("WebSocket is not initialized"));
+
+        if (ws.readyState === WebSocket.OPEN) {
+            return resolve();
+        }
+
+        const timer = setTimeout(() => {
+            reject(new Error("WebSocket connection timeout"));
+        }, timeout);
+
+        const onOpen = () => {
+            clearTimeout(timer);
+            ws.removeEventListener('open', onOpen);
+            resolve();
+        };
+
+        ws.addEventListener('open', onOpen);
+    });
 }
 
 /**
@@ -216,23 +309,29 @@ async function startRecordingWithMetadata() {
             }
         });
 
-        // WebSocket 연결
+        // WebSocket 연결 확인 및 재연결
         if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+            console.log("WebSocket 연결 시도...");
             connectWebSocket();
-            // 연결 완료 대기
-            await new Promise(resolve => setTimeout(resolve, 1000));
         }
 
-        // 메타데이터 전송
-        if (websocket && websocket.readyState === WebSocket.OPEN && meetingMetadata) {
+        // 연결 대기 (최대 10초)
+        await waitForConnection(websocket);
+
+        console.log("WebSocket 연결 확인 완료, 메타데이터 전송 시도");
+
+        // 메타데이터 전송 (필수)
+        if (meetingMetadata) {
             websocket.send(JSON.stringify({
                 type: 'metadata',
                 data: meetingMetadata
             }));
             console.log('메타데이터 전송:', meetingMetadata);
+        } else {
+            throw new Error("메타데이터가 없습니다.");
         }
 
-        // MediaRecorder 설정
+        // START! MediaRecorder 설정
         const options = { mimeType: 'audio/webm;codecs=opus' };
         mediaRecorder = new MediaRecorder(stream, options);
 
@@ -265,7 +364,14 @@ async function startRecordingWithMetadata() {
 
     } catch (error) {
         console.error('녹음 시작 실패:', error);
-        alert('마이크 접근 권한이 필요합니다.');
+        alert(`녹음 시작 실패: ${error.message}`);
+
+        // 실패 시 정리
+        if (websocket) {
+            // websocket.close(); // 연결은 유지?
+        }
+        isRecording = false;
+        btnStart.disabled = false;
     }
 }
 
@@ -278,6 +384,11 @@ function stopRecording() {
     }
 
     isRecording = false;
+
+    // WebSocket 연결 종료 (이것이 서버의 요약 로직을 트리거함)
+    if (websocket) {
+        websocket.close();
+    }
 
     // UI 업데이트
     btnStart.disabled = false;
@@ -306,14 +417,8 @@ function stopRecording() {
  * 메타데이터 수정 확인 모달 표시
  */
 function showEditConfirmationModal() {
-    if (confirm('녹음이 완료되었습니다. 회의 정보를 수정하시겠습니까?')) {
-        // 수정 선택 - 메타데이터 편집 모달 표시
-        showEditMetadataModal();
-    } else {
-        // 그대로 저장 - 대시보드로 이동
-        alert('회의가 저장되었습니다.');
-        window.location.href = '/';
-    }
+    // 사용자 요청: 녹음 종료 후 무조건 수정 모달 표시
+    showEditMetadataModal();
 }
 
 /**
@@ -439,6 +544,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // WebSocket 연결
     connectWebSocket();
+
+    // 메타데이터 제출 버튼 이벤트 연결 (즉시 시작 모드 대응)
+    const submitBtn = document.getElementById('metadata-submit-btn');
+    if (submitBtn) {
+        submitBtn.onclick = submitMetadata;
+    }
 });
 
 // 페이지 이탈 시 정리

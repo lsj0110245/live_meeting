@@ -21,6 +21,9 @@ function checkLoginStatus() {
             })
                 .then(res => {
                     if (res.ok) return res.json();
+                    if (res.status === 403 || res.status === 401) {
+                        throw new Error('Unauthorized');
+                    }
                     throw new Error('Failed to fetch user');
                 })
                 .then(user => {
@@ -36,10 +39,12 @@ function checkLoginStatus() {
                     }
                 })
                 .catch(err => {
-                    console.error('Profile fetch error:', err);
-                    if (err.message === 'Failed to fetch user') {
-                        // 토큰이 만료되었거나 유효하지 않은 경우 로그아웃 처리 가능
-                        // logout(); 
+                    if (err.message === 'Unauthorized') {
+                        // 403/401 에러 시: 회원이 아니거나 인증 만료
+                        alert('회원이 아닙니다.');
+                        logout();
+                    } else {
+                        console.error('Profile fetch error:', err);
                     }
                 });
         } else {

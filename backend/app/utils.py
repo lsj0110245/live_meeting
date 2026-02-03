@@ -18,3 +18,19 @@ def get_unique_title(db: Session, title: str) -> str:
         counter += 1
         
     return title
+
+import os
+
+def get_unique_filename(directory: str, filename: str) -> str:
+    """
+    해당 디렉토리에 동일한 파일명이 있으면 _1, _2 등을 붙여 유니크한 파일명 반환
+    """
+    base, ext = os.path.splitext(filename)
+    counter = 1
+    unique_filename = filename
+    
+    while os.path.exists(os.path.join(directory, unique_filename)):
+        unique_filename = f"{base}_{counter}{ext}"
+        counter += 1
+        
+    return unique_filename

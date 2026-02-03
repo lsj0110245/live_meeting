@@ -33,8 +33,15 @@ async function handleLogin(e) {
             localStorage.setItem('access_token', data.access_token);
             window.location.href = '/';
         } else {
-            const error = await response.json();
-            alert('로그인 실패: ' + (error.detail || '오류가 발생했습니다.'));
+            let errorMessage;
+            try {
+                const error = await response.json();
+                errorMessage = error.detail || '오류가 발생했습니다.';
+            } catch (e) {
+                // JSON 파싱 실패 시 텍스트로 읽기 (500 에러 등)
+                errorMessage = await response.text();
+            }
+            alert('로그인 실패: ' + errorMessage);
         }
     } catch (err) {
         alert('서버 연결 오류');

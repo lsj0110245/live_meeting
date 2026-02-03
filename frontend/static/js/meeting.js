@@ -38,7 +38,6 @@ async function loadMeetingDetails() {
             let relativePath = meeting.audio_file_path;
             if (relativePath.includes('media')) {
                 relativePath = relativePath.split('media')[1];
-                // split 후: ["", "/recordings/audio/xxx.mp3"] (lead slash might be present)
             }
             // 윈도우 경로 역슬래시 처리
             relativePath = relativePath.replace(/\\/g, '/');
@@ -48,14 +47,35 @@ async function loadMeetingDetails() {
             if (player) {
                 player.src = `/media/${relativePath}`;
 
+                // 초기 Duration 표시 (DB 값 우선)
+                const durationElem = document.getElementById('meeting-duration');
+                const playerDurationElem = document.getElementById('player-total-duration');
+
+                const setDurationText = (seconds) => {
+                    const text = `총 재생 시간: ${formatDuration(seconds)}`;
+                    if (durationElem) durationElem.innerText = text;
+                    if (playerDurationElem) playerDurationElem.innerText = text;
+                };
+
+                if (meeting.duration) {
+                    setDurationText(meeting.duration);
+                } else {
+                    if (durationElem) durationElem.innerText = `총 재생 시간: --:--`;
+                }
+
                 // 디버깅용 이벤트 리스너
                 player.addEventListener('error', (e) => {
                     console.error("Audio Load Error:", player.error);
-                    alert(`오디오 로드 실패: ${player.error.message || '알 수 없는 오류'}`);
                 });
 
                 player.addEventListener('loadedmetadata', () => {
                     console.log("Audio Metadata Loaded. Duration:", player.duration);
+                    if (player.duration && player.duration !== Infinity && !isNaN(player.duration)) {
+                        setDurationText(player.duration);
+                    } else if (meeting.duration) {
+                        // 메타데이터가 없는 경우 DB 값 유지
+                        setDurationText(meeting.duration);
+                    }
                 });
 
                 // 타임 업데이트 리스너 추가 (싱크 하이라이팅)
@@ -375,7 +395,23 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
+// 시간 포맷팅 (초 -> HH:MM:SS)
+function formatDuration(seconds) {
+    if (!seconds || isNaN(seconds)) return "00:00";
+
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+
+    if (h > 0) {
+        return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    } else {
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+}
+
 window.exportMeeting = exportMeeting;
 window.closeMetadataModal = closeMetadataModal;
 window.submitMetadataAndExport = submitMetadataAndExport;
 window.seekAudio = seekAudio;
+window.formatDuration = formatDuration;

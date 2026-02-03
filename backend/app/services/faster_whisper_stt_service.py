@@ -52,7 +52,7 @@ class FasterWhisperSTTService:
                 file_path,
                 language=language,
                 beam_size=5,  # 정확도 우선
-                initial_prompt="이것은 비즈니스 회의 녹음입니다. 자연스러운 한국어로 전사해주세요. 추임새(음, 어, 아, 그, 저)는 제외하고, 전문 용어(LLM, SaaS, API, Docker 등)는 정확한 영문 표기를 유지해주세요.", # 문맥 가이드 추가
+                initial_prompt="이것은 비즈니스 회의 녹음입니다. 자연스러운 한국어로 전사해주세요. 추임새는 제외하고, 전문 용어(LLM, SaaS, API, Docker, FastAPI, WebSocket, Backend, Frontend, Git, DB, SQL, Python, JavaScript 등)는 정확한 영문 표기를 유지해주세요.", # 문맥 가이드 추가
                 vad_filter=True,  # 음성 구간 자동 감지
                 vad_parameters=dict(
                     min_silence_duration_ms=1000, # 침묵 감지 기준 상향 (500 -> 1000)
@@ -110,7 +110,7 @@ class FasterWhisperSTTService:
                 temp_path,
                 language=language,
                 beam_size=5,  # 정확도 향상 (기본 1 -> 5)
-                initial_prompt="이것은 비즈니스 회의 녹음입니다. 자연스러운 한국어로 전사해주세요. 추임새(음, 어, 아, 그, 저)는 제외하고, 전문 용어(LLM, SaaS, API, Docker 등)는 정확한 영문 표기를 유지해주세요.",
+                initial_prompt="이것은 비즈니스 회의 녹음입니다. 자연스러운 한국어로 전사해주세요. 추임새는 제외하고, 전문 용어(LLM, SaaS, API, Docker, FastAPI, WebSocket, Backend, Frontend, Git, DB, SQL, Python, JavaScript 등)는 정확한 영문 표기를 유지해주세요.",
                 vad_filter=True,
                 vad_parameters=dict(
                     min_silence_duration_ms=500, # 노이즈 필터링 강화
@@ -173,7 +173,7 @@ class FasterWhisperSTTService:
                         temp_path,
                         language=language,
                         beam_size=5,
-                        initial_prompt="이것은 비즈니스 회의 녹음입니다. 자연스러운 한국어로 전사해주세요. 추임새(음, 어, 아, 그, 저)는 제외하고, 전문 용어(LLM, SaaS, API, Docker 등)는 정확한 영문 표기를 유지해주세요.",
+                        initial_prompt="이것은 비즈니스 회의 녹음입니다. 자연스러운 한국어로 전사해주세요. 추임새는 제외하고, 전문 용어(LLM, SaaS, API, Docker, FastAPI, WebSocket, Backend, Frontend, Git, DB, SQL, Python, JavaScript 등)는 정확한 영문 표기를 유지해주세요.",
                         vad_filter=True,
                         vad_parameters=dict(
                             min_silence_duration_ms=1000,

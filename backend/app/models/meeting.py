@@ -20,6 +20,7 @@ class Meeting(Base):
     file_hash = Column(String(64), nullable=True, index=True) # SHA-256 해시 (중복 방지용)
     status = Column(String, default="pending") # 회의 상태 (pending, processing, completed)
     folder_id = Column(Integer, ForeignKey("folders.id"), nullable=True) # 폴더 ID 추가
+    duration = Column(Integer, default=0) # 녹음 시간 (초)
     
     # 추가 메타데이터
     meeting_type = Column(String, nullable=True) # 회의 유형
@@ -32,3 +33,4 @@ class Meeting(Base):
     folder = relationship("Folder", back_populates="meetings")
     transcripts = relationship("Transcript", back_populates="meeting", cascade="all, delete-orphan")
     summary = relationship("Summary", uselist=False, back_populates="meeting", cascade="all, delete-orphan")
+    intermediate_summaries = relationship("IntermediateSummary", back_populates="meeting", cascade="all, delete-orphan")

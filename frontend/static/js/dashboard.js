@@ -33,6 +33,8 @@ setInterval(updateProgressBars, 1000);
 async function loadFolders() {
     try {
         const token = localStorage.getItem('access_token');
+        if (!token) return;
+
         const response = await fetch('/api/folders/', {
             headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -477,6 +479,8 @@ async function loadMeetings() {
 
     try {
         const token = localStorage.getItem('access_token');
+        if (!token) return;
+
         const res = await fetch('/api/meeting/', {
             headers: { 'Authorization': `Bearer ${token}` }
         });

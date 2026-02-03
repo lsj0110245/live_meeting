@@ -24,7 +24,7 @@ from app.db.base import Base
 
 target_metadata = Base.metadata
 # Alembic이 감지할 수 있도록 모델들을 import 합니다
-from app.models import user, meeting, transcript, summary
+from app.models import user, meeting, transcript, summary, intermediate_summary
 
 # config에서 다른 값들을 가져올 수 있습니다:
 # my_important_option = config.get_main_option("my_important_option")
@@ -58,8 +58,12 @@ def run_migrations_online() -> None:
 
     Engine을 생성하고 context와 연결합니다.
     """
+    configuration = config.get_section(config.config_ini_section, {})
+    if os.getenv("DATABASE_URL"):
+        configuration["sqlalchemy.url"] = os.getenv("DATABASE_URL")
+
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )

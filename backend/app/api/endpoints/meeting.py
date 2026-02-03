@@ -104,8 +104,8 @@ def generate_summary(
     meeting.status = "processing"
     db.commit()
     
-    # Background Task 실행 (sync 래퍼 사용)
-    background_tasks.add_task(run_process_meeting_summary, meeting.id)
+    # Background Task 실행
+    background_tasks.add_task(process_meeting_summary, meeting.id)
     
     return {"message": "회의록 생성이 요청되었습니다. 잠시 후 확인해주세요."}
 
@@ -235,6 +235,10 @@ def update_meeting(
         meeting.attendees = meeting_in.attendees
     if meeting_in.writer is not None:
         meeting.writer = meeting_in.writer
+    if meeting_in.status is not None:
+        meeting.status = meeting_in.status
+    if meeting_in.duration is not None:
+        meeting.duration = meeting_in.duration
     
     db.commit()
     db.refresh(meeting)
@@ -293,8 +297,7 @@ def delete_meeting(
     db.delete(meeting)
     db.commit()
     
-    db.delete(meeting)
-    db.commit()
+
     
     return {"message": "회의가 삭제되었습니다."}
 

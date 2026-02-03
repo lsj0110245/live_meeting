@@ -7,7 +7,7 @@ import json
 from typing import List, Dict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, status
 from sqlalchemy.orm import Session
-from app.db.session import get_db
+from app.db.session import get_db, SessionLocal
 from app.api import deps
 from app.models.user import User
 from app.services.stt_service import stt_service
@@ -29,18 +29,34 @@ class RealtimeSession:
         self.meeting_id = None  # 생성된 Meeting ID
         self.last_summary_time = time.time() # 마지막 요약 시간
         self.transcript_since_last_summary: List[str] = [] # 마지막 요약 이후 쌓인 텍스트
+        self.segment_index = 0  # 전사 세그먼트 인덱스
+        self.header_bytes = None # WebM 헤더 저장용
+        self.audio_path = None # 오디오 파일 경로
+        self.total_duration = 0.0 # 누적 전체 시간 (초)
         
     def add_audio_chunk(self, chunk: bytes, chunk_duration: float = 0.5):
         """오디오 청크 추가"""
+        if self.header_bytes is None:
+            self.header_bytes = chunk # 첫 번째 청크(헤더 포함) 저장
+            
         self.audio_buffer.write(chunk)
         self.buffer_duration += chunk_duration
+        self.total_duration += chunk_duration
         
     def get_buffer_and_reset(self) -> bytes:
         """버퍼 데이터 반환 및 초기화"""
-        data = self.audio_buffer.getvalue()
+        current_buffer_data = self.audio_buffer.getvalue()
+        
+        # 헤더가 있고, 현재 버퍼가 헤더로 시작하지 않으면(즉 두 번째 이후 세그먼트면) 헤더를 붙여줌
+        # io.BytesIO.getvalue()는 bytes를 반환하므로 startswith 사용 가능
+        if self.header_bytes and not current_buffer_data.startswith(self.header_bytes):
+            data_to_process = self.header_bytes + current_buffer_data
+        else:
+            data_to_process = current_buffer_data
+
         self.audio_buffer = io.BytesIO()
         self.buffer_duration = 0
-        return data
+        return data_to_process
     
     def add_transcript(self, text: str):
         """전사 결과 기록"""
@@ -78,7 +94,15 @@ class ConnectionManager:
     async def send_json(self, client_id: str, data: dict):
         session = self.active_sessions.get(client_id)
         if session:
-            await session.websocket.send_json(data)
+            try:
+                await session.websocket.send_json(data)
+            except RuntimeError as e:
+                # 이미 연결이 끊긴 경우
+                print(f"[WebSocket] Send failed (RuntimeError): {e}")
+            except Exception as e:
+                print(f"[WebSocket] Send failed: {e}")
+                # 연결이 끊긴 것으로 간주하고 처리할 수도 있음
+
 
 
 manager = ConnectionManager()
@@ -102,16 +126,23 @@ async def websocket_endpoint(
     2. 5초 분량이 쌓이면 Faster-Whisper로 전사
     3. 전사 결과를 JSON으로 반환
     """
+    print(f"[WebSocket] Connection attempt from client: {client_id}")
     # 1. 인증 검증
     user = None
     try:
         user = deps.get_current_user(db, token=token)
-    except Exception:
+    except Exception as e:
+        print(f"[WebSocket] Authentication failed for {client_id}: {e}")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
-    await manager.connect(client_id, websocket, user)
-    session = manager.get_session(client_id)
+    try:
+        await manager.connect(client_id, websocket, user)
+        session = manager.get_session(client_id)
+        print(f"[WebSocket] Client {client_id} connected successfully.")
+    except Exception as e:
+        print(f"[WebSocket] Connection failed: {e}")
+        return
     
     try:
         # 연결 성공 알림
@@ -123,8 +154,12 @@ async def websocket_endpoint(
         while True:
             # 데이터 수신 (bytes 또는 text)
             try:
-                # 먼저 텍스트로 받아보기 (메타데이터 메시지인 경우)
-                data = await websocket.receive()
+                try:
+                    # 먼저 텍스트로 받아보기 (메타데이터 메시지인 경우)
+                    data = await websocket.receive()
+                except RuntimeError:
+                    # 연결이 이미 닫힌 경우
+                    break
                 
                 if "text" in data:
                     # JSON 메타데이터 메시지
@@ -135,123 +170,254 @@ async def websocket_endpoint(
                         from app.models.meeting import Meeting
                         from datetime import datetime
                         
-                        metadata = message.get("data", {})
-                        session.metadata = metadata
-                        
-                        # Meeting 레코드 생성
-                        from app.utils import get_unique_title
-                        
-                        raw_title = metadata.get("title", "제목 없음")
-                        safe_title = get_unique_title(db, raw_title)
-                        
-                        meeting = Meeting(
-                            title=safe_title,
-                            description="실시간 녹음",
-                            meeting_type=metadata.get("meeting_type"),
-                            meeting_date=datetime.fromisoformat(metadata.get("meeting_date").replace("Z", "+00:00")) if metadata.get("meeting_date") else datetime.now(),
-                            attendees=metadata.get("attendees"),
-                            writer=metadata.get("writer"),
-                            owner_id=user.id,
-                            status="recording"
-                        )
-                        db.add(meeting)
-                        db.commit()
-                        db.refresh(meeting)
-                        
-                        session.meeting_id = meeting.id
-                        print(f"Meeting created: ID={meeting.id}, Title={meeting.title}")
-                        
-                        await manager.send_json(client_id, {
-                            "type": "metadata_saved",
-                            "meeting_id": meeting.id
-                        })
+                        try: 
+                            metadata = message.get("data", {})
+                            session.metadata = metadata
+                            
+                            # Meeting 레코드 생성
+                            from app.utils import get_unique_title
+                            
+                            raw_title = metadata.get("title", "제목 없음")
+                            safe_title = get_unique_title(db, raw_title)
+                            
+                            meeting = Meeting(
+                                title=safe_title,
+                                description="실시간 녹음",
+                                meeting_type=metadata.get("meeting_type"),
+                                meeting_date=datetime.fromisoformat(metadata.get("meeting_date").replace("Z", "+00:00")) if metadata.get("meeting_date") else datetime.now(),
+                                attendees=metadata.get("attendees"),
+                                writer=metadata.get("writer"),
+                                owner_id=user.id,
+                                status="recording"
+                            )
+                            db.add(meeting)
+                            db.commit()
+                            db.refresh(meeting)
+                            
+                            session.meeting_id = meeting.id
+                            print(f"Meeting created: ID={meeting.id}, Title={meeting.title}")
+                            
+                            # 오디오 파일 경로 설정 및 저장
+                            import os
+                            os.makedirs("media", exist_ok=True)
+                            file_filename = f"realtime_{meeting.id}.webm"
+                            # DB에는 상대 경로 저장 (media/...)
+                            relative_path = os.path.join("media", file_filename).replace("\\", "/")
+                            meeting.audio_file_path = relative_path
+                            db.commit()
+                            
+                            # 세션에 절대 경로/상대 경로 저장 (쓰기용)
+                            session.audio_path = relative_path # 또는 절대 경로
+                            
+                            await manager.send_json(client_id, {
+                                "type": "meeting_created",
+                                "meeting_id": meeting.id
+                            })
+                        except Exception as e:
+                            db.rollback()
+                            print(f"Meeting creation failed: {e}")
+                            await manager.send_json(client_id, {
+                                "type": "error",
+                                "message": "회의 생성 중 오류가 발생했습니다."
+                            })
                         continue
                         
                 elif "bytes" in data:
                     # 오디오 데이터
                     audio_chunk = data["bytes"]
                     
-                    # 버퍼에 추가 (대략 0.5초 청크로 가정)
-                    session.add_audio_chunk(audio_chunk, chunk_duration=0.5)
-                    
-                    # 버퍼 임계값 도달 시 전사
-                    if session.buffer_duration >= BUFFER_THRESHOLD_SECONDS:
-                        audio_data = session.get_buffer_and_reset()
-                        
+                    # 1. 파일에 저장 (Append)
+                    if session.audio_path:
                         try:
-                            # Faster-Whisper로 전사
-                            transcript = await stt_service.transcribe_realtime(audio_data)
-                            
-                            if transcript.strip():
-                                session.add_transcript(transcript)
-                                
-                                # Meeting에 전사 결과 저장 (선택적)
-                                if session.meeting_id:
-                                    from app.models.transcript import Transcript
-                                    transcript_record = Transcript(
-                                        meeting_id=session.meeting_id,
-                                        text=transcript,
-                                        speaker="Unknown",
-                                        start_time=0,  # 실시간이므로 정확한 타임스탬프는 추후 개선
-                                        end_time=0
-                                    )
-                                    db.add(transcript_record)
-                                    db.commit()
-                                
-                                # 클라이언트에 전사 결과 전송
-                                await manager.send_json(client_id, {
-                                    "type": "transcript",
-                                    "text": transcript,
-                                    "is_final": True
-                                })
-                                
+                            with open(session.audio_path, "ab") as f:
+                                f.write(audio_chunk)
                         except Exception as e:
-                            print(f"실시간 전사 오류: {str(e)}")
-                            await manager.send_json(client_id, {
-                                "type": "error",
-                                "message": str(e)
-                            })
+                            print(f"Audio write failed: {e}")
+
+                        # 2. 버퍼에 추가 (대략 0.5초 청크로 가정)
+                        session.add_audio_chunk(audio_chunk, chunk_duration=0.5)
+                        
+                        # 버퍼 임계값 도달 시 전사
+                        if session.buffer_duration >= BUFFER_THRESHOLD_SECONDS:
+                            current_segment_duration = session.buffer_duration
+                            audio_data = session.get_buffer_and_reset()
+                        
+                            try:
+                                # Faster-Whisper로 전사
+                                transcript = await stt_service.transcribe_realtime(audio_data)
+                                
+                                if transcript.strip():
+                                    session.add_transcript(transcript)
+                                    
+                                    # Meeting에 전사 결과 저장
+                                    if session.meeting_id:
+                                        from app.models.transcript import Transcript
+                                        
+                                        # 타임스탬프 계산
+                                        end_time = session.total_duration
+                                        start_time = max(0, end_time - current_segment_duration)
+                                        
+                                        transcript_record = Transcript(
+                                            meeting_id=session.meeting_id,
+                                            text=transcript,
+                                            speaker="Unknown",
+                                            start_time=start_time,
+                                            end_time=end_time,
+                                            segment_index=session.segment_index
+                                        )
+                                        db.add(transcript_record)
+                                        db.commit()
+                                        session.segment_index += 1
+                                    
+                                    # 클라이언트에 전사 결과 전송
+                                    await manager.send_json(client_id, {
+                                        "type": "transcript",
+                                        "text": transcript,
+                                        "is_final": True
+                                    })
+                                    
+                            except Exception as e:
+                                db.rollback()
+                                print(f"실시간 전사 오류: {str(e)}")
+                                await manager.send_json(client_id, {
+                                    "type": "error",
+                                    "message": str(e)
+                                })
                     else:
                         # 버퍼링 중 상태 알림
                         await manager.send_json(client_id, {
                             "buffer_seconds": session.buffer_duration
                         })
 
-                    # --- 중간 요약 트리거 (5분마다) ---
+                    # --- 중간 요약 트리거 (백그라운드 비동기 처리) ---
                     current_time = time.time()
-                    if current_time - session.last_summary_time >= 300: # 300초 = 5분
+                    if current_time - session.last_summary_time >= 30: # 3분마다 중간 요약
                         recent_text = session.get_recent_transcript_and_reset()
                         
                         if recent_text.strip():
-                            # LLM 요약 요청 (비동기)
-                            summary = await llm_service.generate_simple_summary(recent_text)
-                            
-                            # 클라이언트에 전송
-                            await manager.send_json(client_id, {
-                                "type": "intermediate_summary",
-                                "content": summary
-                            })
-                            
-                            # TODO: DB 저장 로직 추가 가능 (IntermediateSummary 모델 등)
+                            # 백그라운드 태스크로 분리 (메인 루프를 멈추지 않음)
+                            async def background_summary_task(text, mid, cid):
+                                try:
+                                    # 요약 생성
+                                    summary = await llm_service.generate_simple_summary(text)
+                                    
+                                    if summary and summary.strip():
+                                        # 클라이언트에 전송
+                                        await manager.send_json(cid, {
+                                            "type": "intermediate_summary",
+                                            "content": summary
+                                        })
+                                        
+                                        # DB 저장
+                                        db_context = SessionLocal()
+                                        try:
+                                            from app.models.intermediate_summary import IntermediateSummary
+                                            new_is = IntermediateSummary(meeting_id=mid, content=summary)
+                                            db_context.add(new_is)
+                                            db_context.commit()
+                                        except Exception as e:
+                                            db_context.rollback()
+                                            print(f"Background intermediate summary DB save failed: {e}")
+                                        finally:
+                                            db_context.close()
+                                    else:
+                                        print(f"Skipping empty intermediate summary for meeting {mid}")
+                                        
+                                except Exception as e:
+                                    print(f"Background intermediate summary task failed: {e}")
+
+                            import asyncio
+                            asyncio.create_task(background_summary_task(recent_text, session.meeting_id, client_id))
                         
                         session.last_summary_time = current_time
                         
             except json.JSONDecodeError:
                 # JSON 파싱 실패 - 오디오 데이터로 간주
                 pass
+            except Exception as e:
+                print(f"[WebSocket] Unexpected error in loop: {str(e)}")
+                import traceback
+                traceback.print_exc()
+                break
             
     except WebSocketDisconnect:
-        # 연결 종료 시 Meeting 상태 업데이트
-        if session.meeting_id:
-            from app.models.meeting import Meeting
-            meeting = db.query(Meeting).filter(Meeting.id == session.meeting_id).first()
-            if meeting:
-                meeting.status = "completed"
-                db.commit()
+        print(f"[WebSocket] Client {client_id} disconnected.")
         
-        full_transcript = session.get_full_transcript()
-        print(f"Client #{client_id} disconnected. Full transcript: {full_transcript[:100]}...")
-        manager.disconnect(client_id)
-        
-        # GPU 메모리 정리
-        stt_service.cleanup()
+        # 연결 종료 시 최종 요약 시도 (세션이 있고 Meeting ID가 있을 때)
+        if session and session.meeting_id:
+            # 새로운 DB 세션 생성 (WebSocket 종료 후에도 안전하게 작업하기 위함)
+            background_db = SessionLocal()
+            try:
+                # 1. Meeting 상태 완료 처리
+                from app.models.meeting import Meeting
+                meeting = background_db.query(Meeting).filter(Meeting.id == session.meeting_id).first()
+                if meeting:
+                    meeting.status = "completed"
+                    meeting.duration = int(session.total_duration) # 누적 시간 저장
+                    background_db.commit()
+                    print(f"Meeting {session.meeting_id} status set to completed with duration {meeting.duration}s.")
+                
+                # 2. 최종 요약 생성
+                full_transcript = session.get_full_transcript()
+                
+                # 전사 내용이 어느 정도 있을 때만 요약 시도 (10자 이상)
+                if full_transcript and len(full_transcript) > 10:
+                    print(f"Generating final summary for meeting {session.meeting_id} (Length: {len(full_transcript)})...")
+                    
+                    # LLM 요약 요청
+                    summary_json = await llm_service.generate_summary(meeting.title, full_transcript)
+                    
+                    if summary_json:
+                        # 메타데이터 업데이트
+                        metadata = summary_json.get("metadata", {})
+                        updated = False
+                        if meeting and meeting.title.startswith("실시간 회의") and metadata.get("title_suggestion"):
+                            meeting.title = metadata["title_suggestion"]
+                            updated = True
+                        if meeting and not meeting.meeting_type and metadata.get("meeting_type"):
+                            meeting.meeting_type = metadata["meeting_type"]
+                            updated = True
+                        if meeting and not meeting.attendees and metadata.get("attendees"):
+                            meeting.attendees = metadata["attendees"]
+                            updated = True
+                        
+                        if updated:
+                            background_db.commit()
+                            print(f"Metadata auto-updated for Meeting {meeting.id}")
+                        
+                        # 요약 저장
+                        if "summary" in summary_json:
+                            from app.models.summary import Summary
+                            # 기존 요약 확인
+                            existing_summary = background_db.query(Summary).filter(Summary.meeting_id == session.meeting_id).first()
+                            summary_content = json.dumps(summary_json["summary"], ensure_ascii=False)
+                            
+                            if existing_summary:
+                                existing_summary.content = summary_content
+                            else:
+                                new_summary = Summary(meeting_id=session.meeting_id, content=summary_content)
+                                background_db.add(new_summary)
+                            
+                            background_db.commit()
+                            print(f"Final summary successfully saved for Meeting {session.meeting_id}")
+                    else:
+                        print(f"LLM returned empty summary for Meeting {session.meeting_id}")
+                else:
+                    print(f"Transcript too short ({len(full_transcript) if full_transcript else 0}) for summary. Skipping.")
+                            
+            except Exception as e:
+                print(f"Final summary generation error: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                background_db.close()
+
+        if session:
+            manager.disconnect(client_id)
+            
+    except Exception as e:
+        print(f"[WebSocket] Critical error in WebSocket session: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        if client_id:
+            manager.disconnect(client_id)

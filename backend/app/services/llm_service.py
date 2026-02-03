@@ -12,46 +12,37 @@ class LLMService:
             model=settings.LLM_MODEL,
             temperature=settings.LLM_TEMPERATURE,
             format="json",  # JSON 모드 강제
-            num_ctx=8192    # 컨텍스트 윈도우 확장 (기본 2048 -> 8192)
+            num_ctx=8192,   # 컨텍스트 윈도우 확장 (기본 2048 -> 8192)
+            timeout=300.0   # 요청 타임아웃 5분으로 연장
         )
         
-        # 회의록 요약 프롬프트 템플릿 (JSON 출력)
+        # 회의록 요약 프롬프트 템플릿 (JSON 출력) - Gemma 2 최적화
         self.summary_prompt = ChatPromptTemplate.from_messages([
             ("system", """
-            당신은 전문 회의록 작성 AI 비서입니다. 
-            당신은 회의록 작성 전문가입니다. 한국어 회의 전사 텍스트를 입력받아 구조화된 요약을 생성하세요.
+            당신은 전문 회의록 작성 AI입니다. 입력된 회의 내용을 완벽하게 분석하여 구조화된 JSON 데이터로 변환해야 합니다.
             
-            **중요: 반드시 순수 한국어로만 작성하세요. 영어 단어를 절대 사용하지 마세요.**
+            **필수 규칙:**
+            1. **오직 순수 JSON만 출력하세요.** (Markdown ```json ... ``` 태그 사용 금지)
+            2. 모든 내용은 **한국어(Korean)**로 작성하세요.
+            3. 분석이 불가능한 항목은 빈 문자열("")로 두세요.
             
-            [분석 목표]
-            1. 회의의 유형(meeting_type)을 추론하세요. (예: 주간보고, 아이디어 회의, 프로젝트 점검, 킥오프 등)
-            2. 주요 안건에 맞는 적절한 회의 제목(title_suggestion)을 제안하세요.
-            3. 참석자(attendees)를 대화 내용을 통해 식별하세요. (식별 불가 시 빈 문자열)
-            4. 회의 내용을 상세히 요약하고 정리하세요.
-
-            [출력 JSON 형식]
+            **출력 JSON 포맷:**
             {{
                 "metadata": {{
-                    "title_suggestion": "회의 제목 제안",
-                    "meeting_type": "추론된 회의 유형",
-                    "attendees": "참석자1, 참석자2" 
+                    "title_suggestion": "회의 내용을 대표하는 구체적인 제목",
+                    "meeting_type": "회의 유형 (예: 주간보고, 브레인스토밍, 킥오프, 코드리뷰)",
+                    "attendees": "식별된 참석자 목록 (쉼표로 구분)" 
                 }},
                 "summary": {{
-                    "purpose": "회의 목적 (1-2문장 요약)",
-                    "content": "주요 안건 및 상세 논의 내용 (개조식으로 정리)",
-                    "conclusion": "결론 및 결정 사항 (명확하게)",
-                    "action_items": "향후 계획 및 액션 아이템 (담당자 포함)"
+                    "purpose": "회의의 핵심 목적 (한 문장으로 명확히)",
+                    "content": "주요 논의 사항 (개조식, 중요도 순 정렬)",
+                    "conclusion": "최종 결론 및 합의 사항",
+                    "action_items": "향후 계획 및 담당자별 액션 아이템"
                 }}
             }}
-            
-            **반드시 위 JSON 형식을 엄격히 준수하여 응답하세요.**
-            - Markdown 코드 블록(```json)을 사용하지 마세요. 
-            - 오직 순수 JSON 문자열만 출력하세요.
-            - "summary" 객체 내부의 키(purpose, content, conclusion, action_items)는 필수입니다.
-            - **모든 내용을 순수 한국어로만 작성하세요. 영어 단어 사용 금지.**
             """),
             ("user", """
-            [기존 회의 제목]: {title}
+            [기존 제목]: {title}
             [전사 텍스트]:
             {transcript_text}
             """)
@@ -147,7 +138,8 @@ class LLMService:
                 return content
                 
         except Exception as e:
+            error_msg = f"요약 생성 실패: {str(e)}"
             print(f"Simple Summary Error: {str(e)}")
-            return "요약 생성 실패"
+            return error_msg
 
 llm_service = LLMService()

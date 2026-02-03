@@ -10,7 +10,9 @@ class MeetingBase(BaseModel):
     meeting_type: Optional[str] = None
     meeting_date: Optional[datetime] = None
     attendees: Optional[str] = None
+    attendees: Optional[str] = None
     writer: Optional[str] = None
+    duration: Optional[int] = 0
 
 # 회의 생성 요청 (Create)
 class MeetingCreate(MeetingBase):
@@ -24,6 +26,9 @@ class MeetingUpdate(MeetingBase):
     meeting_date: Optional[datetime] = None
     attendees: Optional[str] = None
     writer: Optional[str] = None
+    writer: Optional[str] = None
+    status: Optional[str] = None
+    duration: Optional[int] = None
 
 # 요약 조회 응답
 class SummarySchema(BaseModel):
