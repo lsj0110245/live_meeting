@@ -104,7 +104,8 @@ def generate_summary(
     meeting.status = "processing"
     db.commit()
     
-    background_tasks.add_task(process_meeting_summary, meeting.id)
+    # Background Task 실행 (sync 래퍼 사용)
+    background_tasks.add_task(run_process_meeting_summary, meeting.id)
     
     return {"message": "회의록 생성이 요청되었습니다. 잠시 후 확인해주세요."}
 
@@ -136,7 +137,8 @@ def retry_analysis(
     
     # 백그라운드 작업 재시작 (upload.py의 process_audio_file 재사용)
     from app.api.endpoints.upload import process_audio_file
-    background_tasks.add_task(process_audio_file, meeting.id, meeting.audio_file_path)
+    # 재분석 시작 (sync 래퍼 사용)
+    background_tasks.add_task(run_process_audio_file, meeting.id, meeting.audio_file_path)
     
     return {"message": "재분석이 시작되었습니다. 잠시 후 확인해주세요."}
 

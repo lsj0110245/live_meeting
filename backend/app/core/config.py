@@ -17,24 +17,17 @@ class Settings(BaseSettings):
     POSTGRES_DB: str
     DATABASE_URL: str
     
-    # Local STT (Faster-Whisper)
-    LOCAL_STT_URL: str = "http://localhost:9000"  # 레거시 호환용 (사용 안 함)
-    
     # LLM 설정 (Ollama)
     LLM_MODEL: str = "llama3.1"  # Ollama 모델명
     LLM_MAX_TOKENS: int = 4096
     LLM_TEMPERATURE: float = 0.3  # LLM 온도 설정
     OLLAMA_BASE_URL: str = "http://llm:11434"  # Docker 내부 통신
-    
+
     # LangSmith (Monitoring)
     LANGCHAIN_TRACING_V2: str = "false"
     LANGCHAIN_ENDPOINT: str = "https://api.smith.langchain.com"
     LANGCHAIN_API_KEY: str | None = None
     LANGCHAIN_PROJECT: str = "LiveMeeting"
-    
-    # Local AI URLs (On-Premise)
-    LOCAL_STT_URL: str = "http://stt:9000"
-    LOCAL_LLM_URL: str = "http://llm:11434"
     
     # JWT 인증 설정
     SECRET_KEY: str

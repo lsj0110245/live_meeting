@@ -22,6 +22,12 @@ from app.db.session import SessionLocal
 
 from app.services.meeting_tasks import process_meeting_summary
 
+def run_process_audio_file(meeting_id: int, file_path: str):
+    """
+    Sync wrapper for BackgroundTasks - async 함수를 제대로 실행하기 위함
+    """
+    asyncio.run(process_audio_file(meeting_id, file_path))
+
 async def process_audio_file(meeting_id: int, file_path: str):
     """
     백그라운드 작업: 오디오 파일 전사 및 결과 저장
@@ -199,7 +205,7 @@ async def upload_file(
     
     # 5. Background Task로 STT 서비스 호출 (중복 여부와 관계없이 항상 실행)
     print(f"📋 [UPLOAD] Scheduling background task for Meeting ID: {meeting.id}")
-    background_tasks.add_task(process_audio_file, meeting.id, file_path)
+    background_tasks.add_task(run_process_audio_file, meeting.id, file_path)
     
     return {
         "meeting_id": meeting.id,

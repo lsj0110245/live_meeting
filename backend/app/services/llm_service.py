@@ -8,7 +8,7 @@ class LLMService:
     def __init__(self):
         # Local Llama 3 (Ollama) 초기화
         self.llm = ChatOllama(
-            base_url=settings.LOCAL_LLM_URL,
+            base_url=settings.OLLAMA_BASE_URL,
             model=settings.LLM_MODEL,
             temperature=settings.LLM_TEMPERATURE,
             format="json",  # JSON 모드 강제
