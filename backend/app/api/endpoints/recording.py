@@ -291,7 +291,7 @@ async def websocket_endpoint(
 
                     # --- 중간 요약 트리거 (백그라운드 비동기 처리) ---
                     current_time = time.time()
-                    if current_time - session.last_summary_time >= 30: # 3분마다 중간 요약
+                    if current_time - session.last_summary_time >= 180: # 3분마다 중간 요약
                         recent_text = session.get_recent_transcript_and_reset()
                         
                         if recent_text.strip():
@@ -343,74 +343,93 @@ async def websocket_endpoint(
     except WebSocketDisconnect:
         print(f"[WebSocket] Client {client_id} disconnected.")
         
-        # 연결 종료 시 최종 요약 시도 (세션이 있고 Meeting ID가 있을 때)
+        # 연결 종료 시 남은 버퍼 처리 및 최종 요약 시도
         if session and session.meeting_id:
-            # 새로운 DB 세션 생성 (WebSocket 종료 후에도 안전하게 작업하기 위함)
-            background_db = SessionLocal()
-            try:
-                # 1. Meeting 상태 완료 처리
-                from app.models.meeting import Meeting
-                meeting = background_db.query(Meeting).filter(Meeting.id == session.meeting_id).first()
-                if meeting:
-                    meeting.status = "completed"
-                    meeting.duration = int(session.total_duration) # 누적 시간 저장
-                    background_db.commit()
-                    print(f"Meeting {session.meeting_id} status set to completed with duration {meeting.duration}s.")
-                
-                # 2. 최종 요약 생성
-                full_transcript = session.get_full_transcript()
-                
-                # 전사 내용이 어느 정도 있을 때만 요약 시도 (10자 이상)
-                if full_transcript and len(full_transcript) > 10:
-                    print(f"Generating final summary for meeting {session.meeting_id} (Length: {len(full_transcript)})...")
-                    
-                    # LLM 요약 요청
-                    summary_json = await llm_service.generate_summary(meeting.title, full_transcript)
-                    
-                    if summary_json:
-                        # 메타데이터 업데이트
-                        metadata = summary_json.get("metadata", {})
-                        updated = False
-                        if meeting and meeting.title.startswith("실시간 회의") and metadata.get("title_suggestion"):
-                            meeting.title = metadata["title_suggestion"]
-                            updated = True
-                        if meeting and not meeting.meeting_type and metadata.get("meeting_type"):
-                            meeting.meeting_type = metadata["meeting_type"]
-                            updated = True
-                        if meeting and not meeting.attendees and metadata.get("attendees"):
-                            meeting.attendees = metadata["attendees"]
-                            updated = True
-                        
-                        if updated:
-                            background_db.commit()
-                            print(f"Metadata auto-updated for Meeting {meeting.id}")
-                        
-                        # 요약 저장
-                        if "summary" in summary_json:
-                            from app.models.summary import Summary
-                            # 기존 요약 확인
-                            existing_summary = background_db.query(Summary).filter(Summary.meeting_id == session.meeting_id).first()
-                            summary_content = json.dumps(summary_json["summary"], ensure_ascii=False)
-                            
-                            if existing_summary:
-                                existing_summary.content = summary_content
-                            else:
-                                new_summary = Summary(meeting_id=session.meeting_id, content=summary_content)
-                                background_db.add(new_summary)
-                            
-                            background_db.commit()
-                            print(f"Final summary successfully saved for Meeting {session.meeting_id}")
-                    else:
-                        print(f"LLM returned empty summary for Meeting {session.meeting_id}")
-                else:
-                    print(f"Transcript too short ({len(full_transcript) if full_transcript else 0}) for summary. Skipping.")
-                            
-            except Exception as e:
-                print(f"Final summary generation error: {e}")
-                import traceback
-                traceback.print_exc()
-            finally:
-                background_db.close()
+            # 1. 남은 오디오 버퍼 처리 (마지막 몇 초 전사)
+            if session.buffer_duration > 0:
+                print(f"[WebSocket] Processing remaining buffer ({session.buffer_duration:.1f}s) for Meeting {session.meeting_id}")
+                audio_data = session.get_buffer_and_reset()
+                try:
+                    # 동기 호출로 마지막 전사 시도 (짧은 오디오이므로 금방 끝남)
+                    last_transcript = await stt_service.transcribe_realtime(audio_data)
+                    if last_transcript.strip():
+                        session.add_transcript(last_transcript)
+                        # DB 저장
+                        from app.models.transcript import Transcript
+                        db_cleanup = SessionLocal()
+                        try:
+                            t_record = Transcript(
+                                meeting_id=session.meeting_id,
+                                text=last_transcript,
+                                speaker="Unknown",
+                                start_time=max(0, session.total_duration - session.buffer_duration), # 대략적 계산
+                                end_time=session.total_duration,
+                                segment_index=session.segment_index
+                            )
+                            db_cleanup.add(t_record)
+                            db_cleanup.commit()
+                        finally:
+                            db_cleanup.close()
+                except Exception as e:
+                    print(f"Failed to transcribe final chunk: {e}")
+
+            # 2. 백그라운드 태스크로 전사 완료 처리 및 요약 실행
+            async def final_cleanup_and_summary(mid, full_text, duration):
+                print(f"[Background Task] Starting final summary for meeting {mid}...")
+                bg_db = SessionLocal()
+                try:
+                    # 상태 업데이트
+                    from app.models.meeting import Meeting
+                    meeting = bg_db.query(Meeting).filter(Meeting.id == mid).first()
+                    if meeting:
+                        meeting.status = "completed"
+                        meeting.duration = int(duration)
+                        bg_db.commit()
+                        print(f"Meeting {mid} finalized.")
+
+                    # 전사 내용이 어느 정도 있을 때만 요약
+                    if full_text and len(full_text) > 10:
+                        summary_json = await llm_service.generate_summary(meeting.title if meeting else "회의", full_text)
+                        if summary_json:
+                            # 메타데이터 업데이트
+                            metadata = summary_json.get("metadata", {})
+                            if meeting:
+                                updated = False
+                                if meeting.title.startswith("실시간 회의") and metadata.get("title_suggestion"):
+                                    meeting.title = metadata["title_suggestion"]
+                                    updated = True
+                                if not meeting.meeting_type and metadata.get("meeting_type"):
+                                    meeting.meeting_type = metadata["meeting_type"]
+                                    updated = True
+                                if not meeting.attendees and metadata.get("attendees"):
+                                    meeting.attendees = metadata["attendees"]
+                                    updated = True
+                                if updated:
+                                    bg_db.commit()
+
+                            # 요약 저장
+                            if "summary" in summary_json:
+                                from app.models.summary import Summary
+                                summary_content = json.dumps(summary_json["summary"], ensure_ascii=False)
+                                existing = bg_db.query(Summary).filter(Summary.meeting_id == mid).first()
+                                if existing:
+                                    existing.content = summary_content
+                                else:
+                                    bg_db.add(Summary(meeting_id=mid, content=summary_content))
+                                bg_db.commit()
+                                print(f"Final summary saved for meeting {mid}.")
+                except Exception as e:
+                    print(f"Final cleanup task failed: {e}")
+                finally:
+                    bg_db.close()
+
+            # 비동기 태스크 시작
+            import asyncio
+            asyncio.create_task(final_cleanup_and_summary(
+                session.meeting_id, 
+                session.get_full_transcript(), 
+                session.total_duration
+            ))
 
         if session:
             manager.disconnect(client_id)

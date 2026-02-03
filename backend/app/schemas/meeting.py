@@ -40,6 +40,15 @@ class SummarySchema(BaseModel):
     class Config:
         from_attributes = True
 
+# 중간 요약 조회 응답
+class IntermediateSummarySchema(BaseModel):
+    id: int
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 # 회의 조회 응답 (Response)
 class Meeting(MeetingBase):
     id: int
@@ -52,6 +61,7 @@ class Meeting(MeetingBase):
     # 전사 및 요약 정보 (SQLAlchemy 관계명과 일치시켜야 함)
     transcripts: List[TranscriptSchema] = []
     summary: Optional[SummarySchema] = None
+    intermediate_summaries: List[IntermediateSummarySchema] = []
     
     class Config:
         from_attributes = True

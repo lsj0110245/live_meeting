@@ -131,6 +131,43 @@ async function loadMeetingDetails() {
             }
         }
 
+        // 중간 요약 타임라인 로딩 로직
+        const timelineSection = document.getElementById('summary-timeline-section');
+        const timelineContent = document.getElementById('summary-timeline-content');
+
+        if (meeting.intermediate_summaries && meeting.intermediate_summaries.length > 0) {
+            if (timelineSection) timelineSection.style.display = 'block';
+            if (timelineContent) {
+                timelineContent.innerHTML = ''; // 초기화
+
+                // 생성 역순(최신순)으로 정렬하여 표시
+                const sortedSummaries = [...meeting.intermediate_summaries].sort((a, b) =>
+                    new Date(b.created_at) - new Date(a.created_at)
+                );
+
+                sortedSummaries.forEach(is => {
+                    const timeStr = new Date(is.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const card = document.createElement('div');
+                    card.className = 'summary-card';
+                    card.style.marginBottom = '15px';
+                    card.style.padding = '15px';
+                    card.style.background = 'var(--bg-dark)';
+                    card.style.borderRadius = '8px';
+                    card.style.border = '1px solid var(--border)';
+
+                    card.innerHTML = `
+                        <div class="summary-time" style="font-size: 0.85rem; color: #3b82f6; font-weight: bold; margin-bottom: 5px;">
+                            <i class="fa-regular fa-clock"></i> ${timeStr}
+                        </div>
+                        <div class="summary-text" style="font-size: 0.95rem; line-height: 1.6;">
+                            ${is.content}
+                        </div>
+                    `;
+                    timelineContent.appendChild(card);
+                });
+            }
+        }
+
     } catch (err) {
         console.error(err);
     }

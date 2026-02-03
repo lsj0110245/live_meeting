@@ -11,9 +11,9 @@ class LLMService:
             base_url=settings.OLLAMA_BASE_URL,
             model=settings.LLM_MODEL,
             temperature=settings.LLM_TEMPERATURE,
-            format="json",  # JSON 모드 강제
-            num_ctx=8192,   # 컨텍스트 윈도우 확장 (기본 2048 -> 8192)
-            timeout=300.0   # 요청 타임아웃 5분으로 연장
+            # format="json",  # 전역 JSON 모드는 가끔 행(Hang)을 유발하므로 해제
+            num_ctx=8192,
+            timeout=300.0
         )
         
         # 회의록 요약 프롬프트 템플릿 (JSON 출력) - Gemma 2 최적화
@@ -128,12 +128,16 @@ class LLMService:
 {text}
 """
             response = await self.llm.ainvoke(prompt)
-            content = response.content
+            content = response.content.strip()
             
-            import json
+            # JSON 추출 시도
             try:
-                data = json.loads(content)
-                return data.get("summary", content)
+                import re
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group(0))
+                    return data.get("summary", content)
+                return content
             except:
                 return content
                 
