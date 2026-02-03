@@ -24,6 +24,11 @@ let allMeetings = [];
 let allFolders = []; // Store folders for dropdown
 let currentFilter = 'all'; // 'all', 'unclassified', or folderId (int)
 let selectedMeetingIds = new Set();
+let selectedFile = null; // 파일 업로드용 전역 변수
+let activeProcessingIds = new Set(); // 진행 중인 회의 ID 추적
+
+// 진행률 폴링 시작 (1초마다)
+setInterval(updateProgressBars, 1000);
 
 async function loadFolders() {
     try {
@@ -492,6 +497,22 @@ async function loadMeetings() {
     }
 }
 
+// 상태 메시지 헬퍼 함수
+function getStatusDisplay(status) {
+    switch (status) {
+        case 'recording':
+            return { text: '녹음 중', class: 'status-recording', icon: 'fa-microphone' };
+        case 'processing':
+            return { text: 'AI 분석 중 (약 1~3분 소요)', class: 'status-processing', icon: 'fa-spinner fa-spin' };
+        case 'completed':
+            return { text: '분석 완료', class: 'status-completed', icon: 'fa-check' };
+        case 'error':
+            return { text: '오류', class: 'status-error', icon: 'fa-circle-exclamation' };
+        default:
+            return { text: '대기 중', class: 'status-unknown', icon: 'fa-clock' };
+    }
+}
+
 function renderMeetingList(meetings) {
     const list = document.getElementById('meeting-list');
     let filtered = meetings;
@@ -509,19 +530,57 @@ function renderMeetingList(meetings) {
         return;
     }
 
+    // processing 상태인 회의가 있는지 확인 (Set 업데이트)
+    activeProcessingIds.clear();
+    filtered.forEach(m => {
+        if (m.status === 'processing') {
+            activeProcessingIds.add(m.id);
+        }
+    });
+
+    const hasProcessing = activeProcessingIds.size > 0;
+
+    // 자동 새로고침 설정 (기존 타이머 제거)
+    if (window.autoRefreshTimer) {
+        clearTimeout(window.autoRefreshTimer);
+        window.autoRefreshTimer = null;
+    }
+
+    // processing 상태가 있으면 5초 후 목록 새로고침 (상태 변경 확인용)
+    if (hasProcessing) {
+        window.autoRefreshTimer = setTimeout(() => {
+            // console.log('Auto-refreshing meetings...');
+            loadMeetings();
+        }, 5000);
+    }
+
     list.innerHTML = filtered.map(meeting => {
         const isSelected = selectedMeetingIds.has(meeting.id);
 
         const date = new Date(meeting.created_at).toLocaleString();
-        let statusClass = 'status-completed';
-        if (meeting.status === 'recording') statusClass = 'status-recording';
-        if (meeting.status === 'processing') statusClass = 'status-processing';
+        const statusInfo = getStatusDisplay(meeting.status);
 
         const title = meeting.title || '제목 없는 회의';
         let fontSize = '1.2rem';
         if (title.length > 30) fontSize = '0.9rem';
         else if (title.length > 20) fontSize = '1.0rem';
         else if (title.length > 12) fontSize = '1.1rem';
+
+        // 진행률 바 (processing 상태일 때만 표시)
+        let progressBarHtml = '';
+        if (meeting.status === 'processing') {
+            progressBarHtml = `
+                <div class="progress-wrapper" style="margin-top:8px; width: 100%;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                        <span style="font-size:0.75rem; color:#94a3b8;">분석 진행률</span>
+                        <span id="progress-text-${meeting.id}" style="font-size:0.75rem; color:#3b82f6; font-weight:bold;">0%</span>
+                    </div>
+                    <div class="progress-bar-bg" style="background:#334155; height:4px; border-radius:2px; overflow:hidden;">
+                        <div id="progress-bar-${meeting.id}" style="width:0%; height:100%; background:#3b82f6; transition:width 0.3s ease;"></div>
+                    </div>
+                </div>
+            `;
+        }
 
         return `
         <div class="meeting-card ${isSelected ? 'selected' : ''}" 
@@ -546,12 +605,46 @@ function renderMeetingList(meetings) {
                     </button>
                 </div>
                 <div class="meeting-date"><i class="fa-regular fa-clock"></i> ${date}</div>
-                <span class="meeting-status ${statusClass}">
-                    ${(meeting.status || 'unknown').toUpperCase()}
+                <span class="meeting-status ${statusInfo.class}">
+                    <i class="fa-solid ${statusInfo.icon}"></i> ${statusInfo.text}
                 </span>
+                ${progressBarHtml}
             </div>
         </div>
     `}).join('');
+}
+
+async function updateProgressBars() {
+    if (activeProcessingIds.size === 0) return;
+
+    const token = localStorage.getItem('access_token');
+
+    // 비동기 병렬 처리
+    const updates = Array.from(activeProcessingIds).map(async (id) => {
+        try {
+            const bar = document.getElementById(`progress-bar-${id}`);
+            const text = document.getElementById(`progress-text-${id}`);
+
+            // DOM에 요소가 없으면 (화면이 바뀌었거나 스크롤 등) 패스
+            if (!bar || !text) return;
+
+            const res = await fetch(`/api/progress/${id}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                const percent = data.progress || 0;
+
+                bar.style.width = `${percent}%`;
+                text.innerText = `${percent}%`;
+            }
+        } catch (e) {
+            console.error(`Progress fetch failed for ${id}`, e);
+        }
+    });
+
+    await Promise.all(updates);
 }
 
 // Drag and Drop
@@ -642,7 +735,6 @@ function setupDragAndDrop() {
 function setupUpload() {
     const fileInput = document.getElementById('file-input');
     const uploadBtn = document.getElementById('btn-upload');
-    let selectedFile = null;
 
     if (uploadBtn && fileInput) {
         uploadBtn.addEventListener('click', () => {
@@ -673,6 +765,13 @@ function showMetadataModal(mode = 'upload') {
         dateInput.style.backgroundColor = '';
         dateInput.style.cursor = '';
         dateInput.value = ''; // 초기화
+
+        // 버튼 이벤트 연결
+        const submitBtn = document.getElementById('metadata-submit-btn');
+        if (submitBtn) {
+            submitBtn.textContent = "확인";
+            submitBtn.onclick = submitMetadata;
+        }
     }
 
     modal.style.display = 'flex';
@@ -724,48 +823,77 @@ async function submitMetadata() {
 /**
  * 메타데이터와 함께 파일 업로드
  */
+/**
+ * 메타데이터와 함께 파일 업로드 (XHR with Progress)
+ */
 async function uploadFileWithMetadata(metadata) {
-    const fileInput = document.getElementById('file-input');
-    const file = fileInput.files[0];
+    // 전역 변수에 저장된 파일 사용
+    const file = selectedFile;
 
     if (!file) {
         alert('파일이 선택되지 않았습니다.');
         return;
     }
 
-    try {
-        alert('업로드를 시작합니다.');
-        const token = localStorage.getItem('access_token');
+    const token = localStorage.getItem('access_token');
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('title', metadata.title);
+    formData.append('meeting_type', metadata.meeting_type);
+    formData.append('meeting_date', metadata.meeting_date);
+    formData.append('attendees', metadata.attendees);
+    formData.append('writer', metadata.writer);
 
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('title', metadata.title);
-        formData.append('meeting_type', metadata.meeting_type);
-        formData.append('meeting_date', metadata.meeting_date);
-        formData.append('attendees', metadata.attendees);
-        formData.append('writer', metadata.writer);
+    // Show Progress Overlay
+    showProgress(`'${file.name}' 업로드 중...`, 0);
 
-        const response = await fetch('/api/upload/file', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`
-            },
-            body: formData
-        });
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload/file', true);
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
-        if (response.ok) {
-            alert('업로드 성공! 분석이 곧 시작됩니다.');
-            await loadMeetings(); // 목록 갱신
-        } else {
-            const error = await response.json();
-            alert('실패: ' + error.detail);
-        }
-    } catch (err) {
-        console.error(err);
-        alert('업로드 중 오류가 발생했습니다.');
-    }
+        // Upload Progress
+        xhr.upload.onprogress = function (e) {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                updateProgress(percentComplete);
+            }
+        };
 
-    fileInput.value = '';
+        // Completion
+        xhr.onload = async function () {
+            hideLoading();
+            if (xhr.status >= 200 && xhr.status < 300) {
+                alert('업로드 완료! AI 분석이 시작되었습니다.');
+                await loadMeetings(); // 목록 갱신
+
+                // Reset inputs
+                const fileInput = document.getElementById('file-input');
+                if (fileInput) fileInput.value = '';
+                selectedFile = null;
+                resolve();
+            } else {
+                let errorMessage = '업로드 실패';
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    errorMessage = response.detail || errorMessage;
+                } catch (e) { console.error(e); }
+
+                alert('실패: ' + errorMessage);
+                resolve(); // Resolve even on error to cleanup? Or reject? Alert handled, so resolve.
+            }
+        };
+
+        // Error
+        xhr.onerror = function () {
+            hideLoading();
+            alert('네트워크 오류로 업로드에 실패했습니다.');
+            console.error('Upload network error');
+            resolve();
+        };
+
+        xhr.send(formData);
+    });
 }
 
 

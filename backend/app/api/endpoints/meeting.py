@@ -125,7 +125,15 @@ def update_meeting(
         meeting.title = meeting_in.title
     if meeting_in.description is not None:
         meeting.description = meeting_in.description
-
+    if meeting_in.meeting_type is not None:
+        meeting.meeting_type = meeting_in.meeting_type
+    if meeting_in.meeting_date is not None:
+        meeting.meeting_date = meeting_in.meeting_date
+    if meeting_in.attendees is not None:
+        meeting.attendees = meeting_in.attendees
+    if meeting_in.writer is not None:
+        meeting.writer = meeting_in.writer
+    
     db.commit()
     db.refresh(meeting)
     return meeting

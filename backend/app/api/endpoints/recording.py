@@ -128,8 +128,13 @@ async def websocket_endpoint(
                         session.metadata = metadata
                         
                         # Meeting 레코드 생성
+                        from app.utils import get_unique_title
+                        
+                        raw_title = metadata.get("title", "제목 없음")
+                        safe_title = get_unique_title(db, raw_title)
+                        
                         meeting = Meeting(
-                            title=metadata.get("title", "제목 없음"),
+                            title=safe_title,
                             description="실시간 녹음",
                             meeting_type=metadata.get("meeting_type"),
                             meeting_date=datetime.fromisoformat(metadata.get("meeting_date").replace("Z", "+00:00")) if metadata.get("meeting_date") else datetime.now(),

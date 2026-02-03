@@ -39,16 +39,9 @@ class FasterWhisperSTTService:
             )
             print("Faster-Whisper 모델 로드 완료")
     
-    async def transcribe_file(self, file_path: str, language: str = "ko") -> str:
+    async def transcribe_file(self, file_path: str, language: str = "ko", progress_callback=None) -> list:
         """
         녹음 파일 전사 (정확도 우선)
-        
-        Args:
-            file_path: 오디오 파일 경로
-            language: 언어 코드 (기본: 한국어)
-            
-        Returns:
-            전사된 텍스트
         """
         print(f"[파일 전사 시작] {file_path}")
         self._initialize_model()
@@ -66,13 +59,27 @@ class FasterWhisperSTTService:
                 )
             )
             
-            # 전사 결과 결합
-            transcript_text = ""
-            for segment in segments:
-                transcript_text += segment.text + " "
+            # 총 지속 시간 (진행률 계산용)
+            total_duration = info.duration
+            print(f"오디오 길이: {total_duration:.2f}초")
             
-            print(f"[파일 전사 완료] 길이: {len(transcript_text)}자")
-            return transcript_text.strip()
+            # 전사 결과 반환 (세그먼트 리스트)
+            result_segments = []
+            for segment in segments:
+                result_segments.append({
+                    "start": segment.start,
+                    "end": segment.end,
+                    "text": segment.text.strip()
+                })
+                # 진행률 업데이트
+                if total_duration > 0 and progress_callback:
+                    percent = int((segment.end / total_duration) * 100)
+                    progress_callback(percent)
+                    
+                print(f"  - [{segment.start:.2f}s ~ {segment.end:.2f}s] {segment.text.strip()[:20]}...")
+            
+            print(f"[파일 전사 완료] 세그먼트 개수: {len(result_segments)}")
+            return result_segments
             
         except Exception as e:
             print(f"Faster-Whisper 전사 오류: {str(e)}")

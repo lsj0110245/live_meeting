@@ -14,20 +14,22 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="meeting-type-input">회의유형 <span class="required">*</span></label>
-                        <input type="text" id="meeting-type-input" class="form-control" placeholder="예: 프로젝트 회의, 팀 미팅 등"
-                            required>
+                        <label for="meeting-type-input">회의유형 <span class="optional">(선택)</span></label>
+                        <input type="text" id="meeting-type-input" class="form-control"
+                            placeholder="AI가 자동으로 분류합니다 (예: 프로젝트 회의)">
                     </div>
 
                     <div class="form-group">
-                        <label for="meeting-date-input">회의일시 <span class="required">*</span></label>
-                        <input type="datetime-local" id="meeting-date-input" class="form-control" required>
+                        <label for="meeting-date-input">회의일시 <span class="optional">(선택)</span></label>
+                        <input type="datetime-local" id="meeting-date-input" class="form-control">
+                        <small style="color: var(--text-sub); display: block; margin-top: 5px;">* 비워두면 현재 시각으로
+                            설정됩니다.</small>
                     </div>
 
                     <div class="form-group">
-                        <label for="meeting-attendees-input">참석자 <span class="required">*</span></label>
+                        <label for="meeting-attendees-input">참석자 <span class="optional">(선택)</span></label>
                         <input type="text" id="meeting-attendees-input" class="form-control"
-                            placeholder="이름을 쉼표로 구분하여 입력하세요 (예: 홍길동, 김철수)" required>
+                            placeholder="AI가 대화 내용을 분석하여 추출합니다">
                     </div>
 
                     <div class="form-group">
@@ -38,8 +40,8 @@
                 </form>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-outline" onclick="closeMetadataModal()">취소</button>
-                <button class="btn" onclick="submitMetadata()">확인</button>
+                <button class="btn btn-outline" type="button" onclick="closeMetadataModal()">취소</button>
+                <button class="btn" type="button" id="metadata-submit-btn">확인</button>
             </div>
         </div>
     </div>
@@ -145,6 +147,12 @@
 
         .form-control::placeholder {
             color: var(--text-secondary);
+        }
+
+        .optional {
+            color: var(--text-sub);
+            font-size: 0.9em;
+            font-weight: normal;
         }
 
         .modal-footer {

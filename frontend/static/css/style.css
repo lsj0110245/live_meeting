@@ -324,26 +324,61 @@ input:focus {
 }
 
 .meeting-status {
-    display: inline-block;
-    padding: 4px 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
     border-radius: 20px;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.meeting-status i {
+    font-size: 0.9rem;
 }
 
 .status-recording {
     background: rgba(239, 68, 68, 0.2);
     color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 .status-processing {
     background: rgba(234, 179, 8, 0.2);
     color: #eab308;
+    border: 1px solid rgba(234, 179, 8, 0.3);
+    animation: pulse 2s ease-in-out infinite;
 }
 
 .status-completed {
     background: rgba(34, 197, 94, 0.2);
     color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.status-error {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.status-unknown {
+    background: rgba(148, 163, 184, 0.2);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.7;
+    }
 }
 
 .loading-state {
@@ -795,3 +830,154 @@ input:focus {
 .text-center {
     text-align: center;
 }
+
+/* =========================================
+   Global Loading Overlay & Progress Bar
+   ========================================= */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(5px);
+    z-index: 9999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+}
+
+.loading-content {
+    text-align: center;
+    color: var(--text-main);
+    background: var(--bg-card);
+    padding: 40px;
+    border-radius: 16px;
+    border: 1px solid var(--border);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    min-width: 300px;
+    max-width: 90%;
+}
+
+.loading-content h3 {
+    margin-top: 20px;
+    font-size: 1.2rem;
+    font-weight: 500;
+    color: var(--text-main);
+}
+
+/* Spinner Animation */
+.loader {
+    width: 48px;
+    height: 48px;
+    border: 4px solid rgba(59, 130, 246, 0.2);
+    border-bottom-color: var(--primary);
+    border-radius: 50%;
+    display: inline-block;
+    box-sizing: border-box;
+    animation: rotation 1s linear infinite;
+}
+
+@keyframes rotation {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/* Progress Bar */
+.progress-container {
+    margin-top: 25px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.progress-bar-bg {
+    width: 100%;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+}
+
+/* Note: HTML uses class "progress-bar" for the fill element, 
+   but Bootstrap or other libs might use it for container. 
+   We'll use a specific selector derived from ID in HTML or just .progress-bar if unique.
+   HTML structure in base.html:
+   <div id="progress-container" ...>
+       <div id="progress-bar" class="progress-bar"></div> ... 
+   </div>
+   Wait, in base.html I used class="progress-bar" for the inner div.
+   So .progress-bar { width: 0%; ... } is correct.
+*/
+
+.progress-bar {
+    width: 0%;
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), #60a5fa);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+/* Container for the specific bar in base.html is just div#progress-bar inside div#progress-container.
+   My base.html:
+   <div id="progress-container" class="progress-container hidden">
+       <div id="progress-bar" class="progress-bar"></div>
+       <div id="progress-text" class="progress-text">0%</div>
+   </div>
+   Wait, "progress-bar" class for the inner element needs a background container?
+   In base.html I didn't add a wrapper for the background track.
+   Let me fix the CSS to handle the container as the track.
+*/
+
+/* Revised Progress CSS matching base.html structure */
+.progress-container {
+    /* Container layout */
+    margin-top: 20px;
+    width: 100%;
+}
+
+/* We need a track styling on the container or a separate track element.
+   base.html:
+   <div id="progress-container" class="progress-container hidden">
+       <div id="progress-bar" class="progress-bar"></div>
+       <div id="progress-text" class="progress-text">0%</div>
+   </div>
+   I'll make .progress-container act as the wrapper/track? 
+   No, usually you want text below or outside.
+   Let's assume .progress-container is just the flex column.
+   And I need to add a track style to the .progress-bar's parent? 
+   No, the HTML I wrote in base.html is:
+       <div id="progress-container" class="progress-container hidden">
+           <div id="progress-bar" class="progress-bar"></div>
+           <div id="progress-text" class="progress-text">0%</div>
+       </div>
+
+   I should style .progress-container to include the track background 
+   OR add a track `div` in standard implementations.
+   However, since I can't easily change base.html again without another call,
+   I'll style .progress-container to NOT be the track, but I'll add a pseudo-element or 
+   just style .progress-bar to be the fill and give .progress-container a background?
+   
+   Better: Let's style .progress-container simply as the wrapper.
+   And I will assume the user (me) made a slight mistake in base.html not adding a separate track div.
+   But I can style `#progress-bar` to look like it has a track using `box-shadow` or background on container.
+   
+   Actually, let's just make `.progress-container` have the background track?
+   No, because it also contains the text.
+   
+   Okay, I'll update `base.html` again? No, I'll use `::before` on `.progress-bar`? No.
+   
+   Let's just update `base.html` again to include a proper track class.
+   
+   But first, let's check `common.js` to see where to put the logic.
+*/

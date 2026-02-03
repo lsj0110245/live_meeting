@@ -142,6 +142,13 @@ function showMetadataModal(mode = 'recording') {
         dateInput.style.cursor = '';
     }
 
+    // 버튼 이벤트 연결
+    const submitBtn = document.getElementById('metadata-submit-btn');
+    if (submitBtn) {
+        submitBtn.textContent = "확인";
+        submitBtn.onclick = submitMetadata;
+    }
+
     modal.style.display = 'flex';
 }
 

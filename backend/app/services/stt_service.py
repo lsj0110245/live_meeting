@@ -12,7 +12,7 @@ class STTService:
     def __init__(self):
         pass  # Faster-Whisper만 사용
 
-    async def transcribe_file_local(self, file_path: str, language: str = "ko") -> str:
+    async def transcribe_file_local(self, file_path: str, language: str = "ko", progress_callback=None) -> list | str:
         """
         Faster-Whisper를 사용하여 녹음 파일 전사 (GPU 최적화)
         """
@@ -20,9 +20,9 @@ class STTService:
             raise FileNotFoundError(f"Audio file not found: {file_path}")
 
         try:
-            # Faster-Whisper 사용
-            transcript_text = await faster_whisper_stt_service.transcribe_file(file_path, language)
-            return transcript_text
+            # Faster-Whisper 사용 (이제 세그먼트 리스트 반환)
+            result = await faster_whisper_stt_service.transcribe_file(file_path, language, progress_callback)
+            return result
                     
         except Exception as e:
             print(f"Local STT Error: {str(e)}")

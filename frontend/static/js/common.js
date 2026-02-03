@@ -71,3 +71,71 @@ async function authFetch(url, options = {}) {
 
     return fetch(url, options);
 }
+
+// =========================================
+// Loading Overlay & Progress Helpers
+// =========================================
+
+/**
+ * Show global loading overlay with spinner
+ * @param {string} message - Optional message to display
+ */
+function showLoading(message = '잠시만 기다려주세요...') {
+    const overlay = document.getElementById('loading-overlay');
+    const msgEl = document.getElementById('loading-message');
+    const progressContainer = document.getElementById('progress-container');
+
+    if (overlay && msgEl) {
+        msgEl.textContent = message;
+        if (progressContainer) progressContainer.classList.add('hidden'); // Hide progress bar for simple loading
+        overlay.classList.remove('hidden');
+    }
+}
+
+/**
+ * Show loading overlay with progress bar
+ * @param {string} message - Message to display
+ * @param {number} percent - Initial percentage (0-100)
+ */
+function showProgress(message = '처리 중...', percent = 0) {
+    const overlay = document.getElementById('loading-overlay');
+    const msgEl = document.getElementById('loading-message');
+    const progressContainer = document.getElementById('progress-container');
+
+    if (overlay && msgEl && progressContainer) {
+        msgEl.textContent = message;
+        progressContainer.classList.remove('hidden');
+        updateProgress(percent);
+        overlay.classList.remove('hidden');
+    }
+}
+
+/**
+ * Update the progress bar percentage
+ * @param {number} percent - Percentage (0-100)
+ */
+function updateProgress(percent) {
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+
+    if (progressBar && progressText) {
+        // Ensure percent is between 0 and 100
+        const p = Math.max(0, Math.min(100, Math.round(percent)));
+        progressBar.style.width = p + '%';
+        progressText.textContent = p + '%';
+    }
+}
+
+/**
+ * Hide global loading overlay
+ */
+function hideLoading() {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        setTimeout(() => {
+            overlay.classList.add('hidden');
+            // Reset progress bar
+            updateProgress(0);
+        }, 500); // Slight delay for smoother UX
+    }
+}

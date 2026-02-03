@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     
     # STT 설정
     STT_LANGUAGE: str = "ko-KR"
-    STT_MODEL_SIZE: str = "medium"
+    STT_MODEL_SIZE: str = "deepdml/faster-whisper-large-v3-turbo-ct2"  # openai/whisper-large-v3-turbo (CT2)
     STT_DEVICE: str = "cuda"
     STT_COMPUTE_TYPE: str = "float16"
     

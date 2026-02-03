@@ -11,7 +11,9 @@ from app.core.config import settings
 from app.models.user import User
 from app.models.meeting import Meeting
 from app.models.transcript import Transcript
+from app.models.transcript import Transcript
 from app.services.stt_service import stt_service
+from app.services.progress_service import progress_service
 import asyncio
 
 router = APIRouter()
@@ -24,22 +26,50 @@ async def process_audio_file(meeting_id: int, file_path: str):
     """
     백그라운드 작업: 오디오 파일 전사 및 결과 저장
     """
+    print(f"🚀 [BG TASK] Started for Meeting ID: {meeting_id}")
+    
     db = SessionLocal()
     try:
         # 1. STT 전사 (Local Whisper)
-        text = await stt_service.transcribe_file_local(file_path)
+        print(f"🎤 [BG TASK] Starting STT transcription...")
+        
+        # 진행률 콜백 함수 정의
+        def update_progress(percent: int):
+            # 0~90%까지만 STT 단계에서 표시 (나머지 10%는 요약 단계 등)
+            adjusted_percent = int(percent * 0.9)
+            progress_service.set_progress(meeting_id, adjusted_percent)
+            # print(f"⏳ [Meeting {meeting_id}] Progress: {adjusted_percent}%") (너무 잦은 로그 방지)
+
+        text = await stt_service.transcribe_file_local(file_path, progress_callback=update_progress)
+        
+        # STT 완료 시 90%로 설정
+        progress_service.set_progress(meeting_id, 90)
+        print(f"✅ [BG TASK] Transcription completed. Length: {len(text) if isinstance(text, str) else len(text)} segments")
         
         # 2. 전사 결과 저장 (Transcript)
-        # 통짜 텍스트로 저장 (Whisper JSON 결과 파싱해서 세그먼트 나누는 것은 추후 고도화)
-        transcript = Transcript(
-            meeting_id=meeting_id,
-            start_time=0.0,
-            end_time=0.0, # 전체 길이는 오디오 메타데이터 필요
-            text=text,
-            speaker="Speaker",
-            segment_index=0 # 통짜 텍스트이므로 0번 세그먼트로 지정
-        )
-        db.add(transcript)
+        # 기존 전사 데이터 삭제 (재분석 시 중복 방지)
+        db.query(Transcript).filter(Transcript.meeting_id == meeting_id).delete()
+        
+        # segments 리스트 순회 저장
+        # text가 리스트(세그먼트)로 반환됨 (stt_service 수정됨)
+        segments = text if isinstance(text, list) else [{'start': 0.0, 'end': 0.0, 'text': str(text)}]
+        
+        for idx, seg in enumerate(segments):
+            transcript = Transcript(
+                meeting_id=meeting_id,
+                start_time=seg.get('start', 0.0),
+                end_time=seg.get('end', 0.0),
+                text=seg.get('text', ''),
+                speaker="Speaker",
+                segment_index=idx
+            )
+            db.add(transcript)
+            
+        # 요약 생성을 위한 전체 텍스트 재구성 (stt_service 결과가 리스트이므로)
+        full_text_for_summary = "\n".join([s.get('text', '') for s in segments])
+        
+        # (주의: 아래 4번 단계에서 process_meeting_summary 호출 시 DB에서 다시 읽으므로 여기선 full_text 변수만 준비하면 됨, 
+        # 하지만 process_meeting_summary 내부 로직은 DB의 Transcript를 읽어서 합치므로, 여기선 DB 저장만 잘하면 됨.) 
         
         # 3. 회의 상태 업데이트
         meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
@@ -47,17 +77,31 @@ async def process_audio_file(meeting_id: int, file_path: str):
             meeting.status = "completed"
             
         db.commit()
-        print(f"Meeting {meeting_id} transcription completed.")
+        print(f"💾 [BG TASK] Meeting {meeting_id} transcription completed.")
 
-        # 4. (추가) 자동 요약 생성
-        # 전사 완료 후 바로 요약 생성 작업 시작
+        # 4. 자동 요약 생성 (90% ~ 100%)
+        print(f"🤖 [BG TASK] Starting AI summary...")
+        progress_service.set_progress(meeting_id, 95) # 요약 시작
         await process_meeting_summary(meeting_id)
         
+        progress_service.set_progress(meeting_id, 100) # 완료
+        print(f"✅ [BG TASK] AI summary completed for Meeting {meeting_id}")
+        
     except Exception as e:
-        print(f"Transcription failed for meeting {meeting_id}: {str(e)}")
-        # 에러 상태 업데이트 로직 추가 가능
+        print(f"❌ [BG TASK ERROR] Meeting {meeting_id}: {type(e).__name__} - {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # 에러 상태 업데이트
+        try:
+            meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
+            if meeting:
+                meeting.status = "error"
+                db.commit()
+        except:
+            pass
     finally:
         db.close()
+        print(f"🏁 [BG TASK] Ended for Meeting ID: {meeting_id}")
 
 router = APIRouter()
 
@@ -67,9 +111,9 @@ async def upload_file(
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks,
     title: str = Form(...),  # 회의명 (필수)
-    meeting_type: str = Form(...),  # 회의유형 (필수)
-    meeting_date: str = Form(...),  # ISO format string expected (필수)
-    attendees: str = Form(...),  # 참석자 (필수)
+    meeting_type: str | None = Form(None),  # 회의유형 (선택)
+    meeting_date: str | None = Form(None),  # ISO format string expected (선택)
+    attendees: str | None = Form(None),  # 참석자 (선택)
     writer: str = Form(...),  # 작성자 (필수)
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_user),
@@ -101,6 +145,7 @@ async def upload_file(
     if existing_meeting and os.path.exists(existing_meeting.audio_file_path):
         # 중복 파일: 기존 파일 경로 재사용 (실제 파일이 존재하는 경우에만)
         is_duplicate = True
+        file_path = existing_meeting.audio_file_path  # 기존 파일 경로 사용
         # Note: We don't update metadata for existing meetings to avoid overwriting user history unintentionally
         # unless specifically requested. For now, just return existing.
         meeting = existing_meeting
@@ -131,8 +176,13 @@ async def upload_file(
             except:
                 pass # Fail silently or handle error
 
+        from app.utils import get_unique_title
+        
+        # 제목 중복 처리
+        safe_title = get_unique_title(db, title)
+
         meeting = Meeting(
-            title=title,  # 사용자가 입력한 회의명 사용
+            title=safe_title,  # 중복 처리된 제목 사용
             owner_id=current_user.id,
             audio_file_path=file_path,
             file_hash=file_hash,
@@ -146,9 +196,10 @@ async def upload_file(
         db.add(meeting)
         db.commit()
         db.refresh(meeting)
-        
-        # 5. Background Task로 STT 서비스 호출 (중복 아니거나 신규 생성일 때)
-        background_tasks.add_task(process_audio_file, meeting.id, file_path)
+    
+    # 5. Background Task로 STT 서비스 호출 (중복 여부와 관계없이 항상 실행)
+    print(f"📋 [UPLOAD] Scheduling background task for Meeting ID: {meeting.id}")
+    background_tasks.add_task(process_audio_file, meeting.id, file_path)
     
     return {
         "meeting_id": meeting.id,

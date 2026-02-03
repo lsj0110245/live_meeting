@@ -45,6 +45,19 @@
         {% block content %}{% endblock %}
     </div>
 
+    <!-- Global Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="loading-content">
+            <div class="loader"></div>
+            <h3 id="loading-message">잠시만 기다려주세요...</h3>
+
+            <div id="progress-container" class="progress-container hidden">
+                <div id="progress-bar" class="progress-bar"></div>
+                <div id="progress-text" class="progress-text">0%</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Common JS -->
     <script src="/static/js/common.js"></script>
 
