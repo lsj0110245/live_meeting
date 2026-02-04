@@ -1,9 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi import Request
+import mimetypes
 from app.core.config import settings
 import os
 
@@ -69,8 +69,42 @@ if not static_dir.exists():
     # 에러를 방지하기 위해 빈 디렉토리라도 생성하거나 예외 처리 필요할 수 있음
     # 여기서는 진행하지만 실행 시 에러 발생 가능성 있음
 
-app.mount("/media", StaticFiles(directory="/app/media"), name="media") # 미디어 파일 서빙 (별도 경로)
+# 미디어 파일 디렉토리 설정 (settings.MEDIA_ROOT 사용)
+media_dir = settings.MEDIA_ROOT
+if not media_dir.exists():
+    media_dir.mkdir(parents=True, exist_ok=True)
+
+print(f"INFO: Media Directory (MEDIA_ROOT) resolved to: {media_dir}")
+# MIME 타입 보강 (음성 재생 호환성)
+mimetypes.add_type('audio/webm', '.webm')  # 다시 audio/webm으로 복구 (오디오 전용)
+mimetypes.add_type('audio/wav', '.wav')
+mimetypes.add_type('audio/mpeg', '.mp3')
+
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+@app.get("/media/{file_path:path}")
+async def get_media(file_path: str):
+    """
+    미디어 파일 서빙 엔드포인트
+    - FileResponse를 사용하여 브라우저의 Range 요청(Seeking) 및 캐싱 자동 처리
+    """
+    abs_path = settings.MEDIA_ROOT / file_path
+    if not abs_path.exists() or not abs_path.is_file():
+        raise HTTPException(status_code=403, detail=f"Permission denied or file not found: {file_path}") # 403인 경우도 고려 (권한)
+    
+    # MIME 타입 유추 (이미 위에서 .webm 등 보강됨)
+    return FileResponse(
+        abs_path,
+        filename=os.path.basename(abs_path),
+        content_disposition_type="inline",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+    )
+
+# --------------------------------------------------
 templates = Jinja2Templates(directory=str(templates_dir))
 
 # CORS 설정

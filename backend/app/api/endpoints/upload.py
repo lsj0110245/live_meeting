@@ -175,11 +175,13 @@ async def upload_file(
         
     else:
         # 신규 파일(또는 DB에는 있지만 실제 파일이 없는 경우): 저장
-        upload_dir = "media/recordings/audio"
-        os.makedirs(upload_dir, exist_ok=True)
+        upload_dir = settings.MEDIA_ROOT / "recordings" / "audio"
+        upload_dir.mkdir(parents=True, exist_ok=True)
         
         safe_filename = f"{uuid.uuid4()}.{ext}"
-        file_path = os.path.join(upload_dir, safe_filename)
+        # 실제 저장 경로는 절대 경로 사용
+        abs_file_path = upload_dir / safe_filename
+        file_path = str(abs_file_path)
         
         try:
             with open(file_path, "wb") as buffer:
@@ -207,7 +209,7 @@ async def upload_file(
         meeting = Meeting(
             title=safe_title,  # 중복 처리된 제목 사용
             owner_id=current_user.id,
-            audio_file_path=file_path,
+            audio_file_path=f"media/recordings/audio/{safe_filename}", # DB에는 서빙용 상대 경로 저장
             file_hash=file_hash,
             description="파일 업로드된 회의",
             meeting_type=meeting_type,
@@ -231,3 +233,41 @@ async def upload_file(
         "is_duplicate": is_duplicate, 
         "message": "기존 파일을 재사용합니다." if is_duplicate else "파일이 성공적으로 업로드되었습니다."
     }
+@router.post("/recording/{meeting_id}/finalize")
+async def finalize_recording(
+    meeting_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    실시간 녹음 종료 후 완성된 오디오 파일을 업로드하여 기존 파일을 교체 (메타데이터 복구)
+    """
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id, Meeting.owner_id == current_user.id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    # 파일 확장자 및 타입 체크
+    if not file.filename.endswith(('.webm', '.wav', '.mp3')):
+        raise HTTPException(status_code=400, detail="Invalid audio format")
+
+    try:
+        # 파일 저장 경로 (기존 파일명 유지 또는 새 이름)
+        filename = f"realtime_{meeting_id}.webm"
+        file_path = settings.MEDIA_ROOT / filename
+        
+        # 실제 파일 시스템에 쓰기 (기존 조각 파일 덮어쓰기)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        print(f"✅ [Finalize] Audio file for meeting {meeting_id} replaced with indexed version.")
+        
+        # DB 경로 업데이트 (이미 같은 경로일 수 있지만 확인 차원)
+        meeting.audio_file_path = f"media/{filename}"
+        meeting.status = "completed" # 최종 완료 상태 보장
+        db.commit()
+        
+        return {"status": "success", "message": "Recording finalized"}
+    except Exception as e:
+        print(f"❌ [Finalize] Failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -3,6 +3,7 @@
 const meetingId = window.location.pathname.split('/').pop();
 let currentExportFormat = null;
 let currentMeetingData = {}; // 현재 회의 데이터 저장용
+let isPolling = false; // 현재 폴링 중인지 확인
 
 document.addEventListener('DOMContentLoaded', async () => {
     const token = localStorage.getItem('access_token');
@@ -44,7 +45,7 @@ async function loadMeetingDetails() {
             if (relativePath.startsWith('/')) relativePath = relativePath.substring(1);
 
             const player = document.getElementById('audio-player');
-            if (player) {
+            if (player && player.src !== window.location.origin + `/media/${relativePath}`) {
                 player.src = `/media/${relativePath}`;
 
                 // 초기 Duration 표시 (DB 값 우선)
@@ -63,25 +64,17 @@ async function loadMeetingDetails() {
                     if (durationElem) durationElem.innerText = `총 재생 시간: --:--`;
                 }
 
-                // 디버깅용 이벤트 리스너
-                player.addEventListener('error', (e) => {
-                    console.error("Audio Load Error:", player.error);
-                });
-
-                player.addEventListener('loadedmetadata', () => {
-                    console.log("Audio Metadata Loaded. Duration:", player.duration);
+                player.onloadedmetadata = () => {
                     if (player.duration && player.duration !== Infinity && !isNaN(player.duration)) {
                         setDurationText(player.duration);
                     } else if (meeting.duration) {
-                        // 메타데이터가 없는 경우 DB 값 유지
                         setDurationText(meeting.duration);
                     }
-                });
+                };
 
-                // 타임 업데이트 리스너 추가 (싱크 하이라이팅)
-                player.addEventListener('timeupdate', () => {
+                player.ontimeupdate = () => {
                     highlightCurrentTranscript(player.currentTime);
-                });
+                };
             }
         }
 
@@ -90,7 +83,10 @@ async function loadMeetingDetails() {
             if (meeting.transcripts && meeting.transcripts.length > 0) {
                 transcriptList.innerHTML = ''; // 초기화
 
-                meeting.transcripts.forEach(t => {
+                // 시간순(오름차순)으로 정렬
+                const sortedTranscripts = [...meeting.transcripts].sort((a, b) => a.start_time - b.start_time);
+
+                sortedTranscripts.forEach(t => {
                     // 시간 포맷팅 (초 -> mm:ss)
                     const formatTime = (seconds) => {
                         const m = Math.floor(seconds / 60);
@@ -102,16 +98,40 @@ async function loadMeetingDetails() {
                     item.className = 'transcript-item';
                     item.dataset.startTime = t.start_time; // 시작 시간 저장
                     item.dataset.endTime = t.end_time; // 종료 시간 저장
-                    item.style.cursor = 'pointer';
-                    item.onclick = () => seekAudio(t.start_time);
+                    // item.style.cursor = 'pointer'; // 클릭 기능 제거
+                    // item.onclick = () => seekAudio(t.start_time); // 클릭 기능 제거
+
+
+                    // 키워드 태그 파싱 logic ([키워드] 텍스트...)
+                    let displayText = t.text;
+                    let keywordBadge = '';
+                    const tagMatch = t.text.match(/^\[(.*?)\]\s*(.*)/);
+
+                    if (tagMatch) {
+                        const keyword = tagMatch[1];
+                        displayText = tagMatch[2];
+                        // 키워드 뱃지 생성 (색상은 랜덤 또는 고정)
+                        // var(--primary) 색상 사용
+                        keywordBadge = `<span style="
+                            display: inline-block;
+                            background-color: #e7f1ff;
+                            color: #007bff;
+                            padding: 2px 8px;
+                            border-radius: 12px;
+                            font-size: 0.8em;
+                            font-weight: bold;
+                            margin-right: 8px;
+                            vertical-align: middle;
+                        ">${keyword}</span>`;
+                    }
 
                     item.innerHTML = `
-                        <div class="time" style="color:#007bff; font-weight:bold;">
+                        <!-- 시간은 보조 정보로 축소 -->
+                        <div class="time" style="color:#aaa; font-size: 0.8em; min-width: 40px; margin-top: 4px;">
                             ${formatTime(t.start_time)}
                         </div>
-                        <div class="content">
-                            <span class="speaker" style="font-weight:bold; margin-right:5px;">${t.speaker}:</span>
-                            ${t.text}
+                        <div class="content" style="flex: 1; line-height: 1.6;">
+                            ${keywordBadge}<span style="vertical-align: middle;">${displayText}</span>
                         </div>
                     `;
                     transcriptList.appendChild(item);
@@ -140,11 +160,14 @@ async function loadMeetingDetails() {
                         <p>AI가 회의록을 정리하고 있습니다...<br><span style="font-size:0.8rem;">잠시만 기다려주세요. 하이라이트 분석 중입니다.</span></p>
                     </div>
                 `;
-                // 5초 후 자동 새로고침 시도
-                setTimeout(() => {
-                    console.log("Retrying to load summary...");
-                    loadMeetingDetails();
-                }, 5000);
+                // 10초 후 자동 새로고침 시도 (단, 폴링 중이 아닐 때만)
+                if (!isPolling) {
+                    isPolling = true;
+                    setTimeout(async () => {
+                        await loadMeetingDetails();
+                        isPolling = false;
+                    }, 10000);
+                }
             } else {
                 summaryContent.innerHTML = '<p class="placeholder-text">회의록이 아직 생성되지 않았습니다.</p>';
             }

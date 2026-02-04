@@ -41,6 +41,8 @@ class RealtimeSession:
             self.header_bytes = chunk # 첫 번째 청크(헤더 포함) 저장
             
         self.audio_buffer.write(chunk)
+        # WebM 스트리밍: 각 청크는 독립적인 클러스터로 구성되어야 하며, 
+        # 첫 번째 청크는 반드시 EBML 헤더와 세그먼트 정보를 포함해야 함 (클라이언트 전달 책임)
         self.buffer_duration += chunk_duration
         self.total_duration += chunk_duration
         
@@ -198,17 +200,20 @@ async def websocket_endpoint(
                             session.meeting_id = meeting.id
                             print(f"Meeting created: ID={meeting.id}, Title={meeting.title}")
                             
-                            # 오디오 파일 경로 설정 및 저장
-                            import os
-                            os.makedirs("media", exist_ok=True)
+                            # 오디오 파일 경로 설정 및 저장 (settings.MEDIA_ROOT 사용)
+                            from app.core.config import settings
+                            media_root = settings.MEDIA_ROOT
+                            media_root.mkdir(parents=True, exist_ok=True)
+                            
                             file_filename = f"realtime_{meeting.id}.webm"
-                            # DB에는 상대 경로 저장 (media/...)
-                            relative_path = os.path.join("media", file_filename).replace("\\", "/")
+                            # DB에는 서비스 서빙용 상대 경로 저장 (media/...)
+                            relative_path = f"media/{file_filename}"
                             meeting.audio_file_path = relative_path
                             db.commit()
                             
-                            # 세션에 절대 경로/상대 경로 저장 (쓰기용)
-                            session.audio_path = relative_path # 또는 절대 경로
+                            # 세션에 실제 파일 시스템 상의 절대 경로 저장 (쓰기용)
+                            abs_file_path = media_root / file_filename
+                            session.audio_path = str(abs_file_path)
                             
                             await manager.send_json(client_id, {
                                 "type": "meeting_created",
@@ -363,7 +368,6 @@ async def websocket_endpoint(
                                 except Exception as e:
                                     print(f"Background intermediate summary task failed: {e}")
 
-                            import asyncio
                             asyncio.create_task(background_summary_task(recent_text, session.meeting_id, client_id))
                         
                         session.last_summary_time = current_time
@@ -479,7 +483,6 @@ async def websocket_endpoint(
                     bg_db.close()
 
             # 비동기 태스크 시작
-            import asyncio
             asyncio.create_task(final_cleanup_and_summary(
                 session.meeting_id, 
                 session.get_full_transcript(), 

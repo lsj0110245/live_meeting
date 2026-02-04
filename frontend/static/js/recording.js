@@ -7,10 +7,8 @@
 // 전역 변수
 let websocket = null;
 let mediaRecorder = null;
-let audioChunks = [];
+let audioChunks = []; // 오디오 데이터 조각 수집용
 let isRecording = false;
-let recordingSeconds = 0;
-let fullTranscript = "";
 let currentMeetingId = null; // 현재 녹음 중인 회의 ID
 
 // DOM 요소
@@ -342,8 +340,11 @@ async function startRecordingWithMetadata() {
 
         mediaRecorder.ondataavailable = function (event) {
             if (event.data.size > 0 && websocket && websocket.readyState === WebSocket.OPEN) {
-                // 오디오 청크를 WebSocket으로 전송
+                // 1. WebSocket 전송 (실시간 STT용)
                 websocket.send(event.data);
+
+                // 2. 메모리에 수집 (종료 시 최종 업로드용)
+                audioChunks.push(event.data);
             }
         };
 
@@ -418,8 +419,46 @@ function stopRecording() {
         fullTranscriptEl.value = fullTranscript;
     }
 
+    // 최종 오디오 파일 업로드 (메타데이터/Duration 복구)
+    finalizeAudioUpload();
+
     // 메타데이터 수정 확인 모달 표시
     showEditConfirmationModal();
+}
+
+/**
+ * 최종 오디오 파일 업로드 (Indexed WebM)
+ */
+async function finalizeAudioUpload() {
+    if (!currentMeetingId || audioChunks.length === 0) return;
+
+    console.log("Starting final audio upload to finalize metadata...");
+    const token = localStorage.getItem('access_token');
+
+    // 조각들을 하나의 Blob으로 합침 (브라우저가 이 과정에서 Duration 등을 포함한 정규 WebM 생성)
+    const finalBlob = new Blob(audioChunks, { type: 'audio/webm' });
+
+    const formData = new FormData();
+    formData.append('file', finalBlob, 'recording.webm');
+
+    try {
+        const response = await fetch(`/api/upload/recording/${currentMeetingId}/finalize`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}` },
+            body: formData
+        });
+
+        if (response.ok) {
+            console.log("✅ Audio finalized successfully.");
+        } else {
+            console.error("❌ Failed to finalize audio:", await response.text());
+        }
+    } catch (err) {
+        console.error("❌ Error uploading final audio:", err);
+    } finally {
+        // 메모리 해제
+        audioChunks = [];
+    }
 }
 
 /**
@@ -506,17 +545,37 @@ function updateTranscript(id, newText) {
 
     const span = transcriptContent.querySelector(`.transcript-segment[data-id="${id}"]`);
     if (span) {
-        // 텍스트 교체
-        span.textContent = newText + ' ';
+        // [키워드] 파싱
+        let displayText = newText;
+        let keywordBadge = '';
+        const tagMatch = newText.match(/^\[(.*?)\]\s*(.*)/);
+
+        if (tagMatch) {
+            const keyword = tagMatch[1];
+            displayText = tagMatch[2];
+            keywordBadge = `<span style="
+                display: inline-block;
+                background-color: #e7f1ff;
+                color: #007bff;
+                padding: 2px 6px;
+                border-radius: 12px;
+                font-size: 0.9em;
+                font-weight: bold;
+                margin-right: 6px;
+                vertical-align: middle;
+            ">${keyword}</span>`;
+        }
+
+        // 텍스트 교체 (Badge + Text)
+        span.innerHTML = keywordBadge + displayText + ' ';
 
         // 시각적 피드백 (초록색 플래시)
-        span.style.transition = 'background-color 0.5s ease, color 0.5s ease';
+        span.style.transition = 'background-color 0.5s ease';
         span.style.backgroundColor = 'rgba(74, 222, 128, 0.2)'; // 연한 초록색 배경
-        span.style.color = '#4ade80'; // 초록색 텍스트
+        // span.style.color = '#4ade80'; // 텍스트 색 변경은 Badge 땜에 애매하므로 배경만 Flash
 
         setTimeout(() => {
             span.style.backgroundColor = 'transparent';
-            span.style.color = ''; // 원래 색상 복귀
         }, 1500);
 
         console.log(`Transcript corrected [${id}]: ${newText}`);

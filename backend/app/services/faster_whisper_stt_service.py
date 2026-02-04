@@ -9,6 +9,7 @@ Faster-Whisper 기반 STT 서비스
 
 import os
 import tempfile
+import re
 from typing import Optional
 from faster_whisper import WhisperModel
 
@@ -109,30 +110,50 @@ class FasterWhisperSTTService:
             f.write(audio_bytes)
             temp_path = f.name
         
-        try:
-            # 실시간용: beam_size 낮춰서 속도 향상
-            segments, info = self.model.transcribe(
-                temp_path,
-                language=language,
-                beam_size=5,  # 정확도 향상 (기본 1 -> 5)
-                initial_prompt="이것은 비즈니스 회의 녹음입니다. 자연스러운 한국어로 전사해주세요. 추임새는 제외하고, 전문 용어(LLM, SaaS, API, Docker, FastAPI, WebSocket, Backend, Frontend, Git, DB, SQL, Python, JavaScript 등)는 정확한 영문 표기를 유지해주세요.",
-                vad_filter=True,
-                vad_parameters=dict(
-                    min_silence_duration_ms=500, # 노이즈 필터링 강화
-                    speech_pad_ms=400
+            try:
+                # 실시간용 파라미터 고도화
+                segments, info = self.model.transcribe(
+                    temp_path,
+                    language=language,
+                    beam_size=3,  # 정확도와 속도 균형 (1 -> 3)
+                    condition_on_previous_text=False, # 환각 및 반복 전파 방지
+                    initial_prompt="비즈니스 회의입니다. API, Docker, LLM, OAuth, AES-256, Microservice, Governance 등 전문 용어는 영문 표기를 유지하세요.",
+                    vad_filter=True,
+                    vad_parameters=dict(
+                        min_silence_duration_ms=1000,
+                        speech_pad_ms=400
+                    )
                 )
-            )
+
+                transcript_text = ""
+                for segment in segments:
+                    # [후처리] 환각 패턴 및 무의미한 반복 제거
+                    text = segment.text.strip()
+                    
+                    # 1. 특정 환각 패턴 (박진희 자막 등) 제거
+                    if re.search(r"자막|박진희|vostfr|Subtitles|Thank you", text, re.I):
+                        continue
+                    
+                    # 2. 너무 짧거나 의미 없는 추임새 (감사합니다 등 반복) 필터링
+                    # (실시간 청크에서는 무음 시 환각으로 자주 발생함)
+                    if len(text) <= 1:
+                        continue
+                        
+                    transcript_text += text + " "
+
+                return transcript_text.strip()
+
+            except Exception as e:
+                if "Invalid data found" in str(e):
+                    # 잡음/무음 구간에서 발생하는 에러 무시
+                    return ""
+                print(f"Realtime STT Internal Error: {e}")
+                raise e
             
-            transcript_text = ""
-            for segment in segments:
-                transcript_text += segment.text + " "
-            
-            return transcript_text.strip()
-            
-        finally:
-            # 임시 파일 삭제
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
+            finally:
+                # 임시 파일 삭제
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
     
     async def transcribe_file_chunked(self, file_path: str, language: str = "ko", progress_callback=None) -> list:
         """

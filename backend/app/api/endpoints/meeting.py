@@ -8,6 +8,7 @@ from app.models.summary import Summary
 from app.models.user import User
 from app.schemas.meeting import Meeting as MeetingSchema, MeetingCreate, MeetingUpdate
 from app.services.llm_service import llm_service
+from app.core.config import settings
 from typing import Any, List
 import asyncio
 import os
@@ -128,8 +129,17 @@ def retry_analysis(
         raise HTTPException(status_code=400, detail="권한이 없습니다.")
     
     # 오디오 파일 존재 확인
-    if not meeting.audio_file_path or not os.path.exists(meeting.audio_file_path):
-        raise HTTPException(status_code=400, detail="오디오 파일을 찾을 수 없습니다.")
+    if not meeting.audio_file_path:
+        raise HTTPException(status_code=400, detail="오디오 파일 정보가 없습니다.")
+        
+    # 실제 파일 경로 계산
+    if meeting.audio_file_path.startswith("media/"):
+        file_path = str(settings.MEDIA_ROOT / meeting.audio_file_path.replace("media/", "", 1))
+    else:
+        file_path = meeting.audio_file_path
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=400, detail=f"오디오 파일을 찾을 수 없습니다: {file_path}")
     
     # 상태를 processing으로 변경
     meeting.status = "processing"
@@ -191,7 +201,9 @@ def update_meeting(
                 safe_title = re.sub(r'[\\/*?:"<>|]', "", meeting_in.title)
                 safe_title = safe_title.replace(" ", "_")
                 new_filename = f"{safe_title}{file_ext}"
-                new_path = os.path.join(dir_name, new_filename)
+                
+                # MEDIA_ROOT를 명확히 사용하여 새 경로 설정
+                new_path = str(Path(dir_name) / new_filename)
                 
                 # 3. 이름 충돌 처리 (숫자 붙이기)
                 counter = 1
@@ -264,26 +276,14 @@ def delete_meeting(
 
     # 파일 삭제 시도
     if meeting.audio_file_path:
-        import os
-        # Docker 환경 경로 고려 (/app/...)
-        # meeting.audio_file_path는 DB에 저장된 상대 경로일 수도 있고 절대 경로일 수도 있음.
-        # 저장 로직을 확인해보면 "media/filename" 형태로 저장되는지 확인 필요하나, 
-        # 일단 절대 경로로 간주하거나 working directory 기준 상대 경로로 처리 시도.
+        # meeting.audio_file_path는 "media/..." 또는 절대 경로일 수 있음
+        file_path_raw = meeting.audio_file_path
         
-        # main.py에서 BASE_DIR 설정 등을 참고하여 실제 파일 경로 추론
-        # 여기선 안전하게 절대 경로 처리를 위해 로직 추가보다는 os.remove 시도
-        
-        # NOTE: DB에 어떻게 저장되는지 확인하지 못했으므로, 
-        # 만약 "media/xxx.mp3"로 저장된다면 현재 작업 디렉토리(backend) 기준인지 확인 필요.
-        # Docker volume 매핑: ./media:/app/media
-        # Python working dir: /app
-        # 따라서 "media/xxx.mp3"라면 os.path.join("/app", meeting.audio_file_path) 일 것임.
-        
-        file_path = meeting.audio_file_path
-        
-        # 만약 절대 경로가 아니라면 /app/ (또는 현재 workdir)를 붙여줌
-        if not os.path.isabs(file_path):
-             file_path = os.path.join("/app", file_path) # Docker 내부 경로 기준
+        if file_path_raw.startswith("media/"):
+            # "media/"로 시작하는 상대 경로를 MEDIA_ROOT 기반 절대 경로로 변환
+            file_path = str(settings.MEDIA_ROOT / file_path_raw.replace("media/", "", 1))
+        else:
+            file_path = file_path_raw
 
         try:
             if os.path.exists(file_path):
