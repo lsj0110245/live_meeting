@@ -97,6 +97,11 @@ class FasterWhisperSTTService:
         Returns:
             전사된 텍스트
         """
+        # 데이터 유효성 검사 (너무 작으면 스킵)
+        if not audio_bytes or len(audio_bytes) < 1024:  # 1KB 미만은 무시
+            print(f"Skipping tiny audio chunk: {len(audio_bytes)} bytes")
+            return ""
+
         self._initialize_model()
         
         # bytes를 임시 파일로 저장

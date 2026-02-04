@@ -49,8 +49,7 @@ Thumbs.db
 postgres_data/
 
 # Media files
-media/recordings/
-media/transcripts/
+media/
 exports/
 
 # Logs
@@ -69,3 +68,5 @@ htmlcov/
 
 # Alembic
 alembic/versions/*.pyc
+
+media
