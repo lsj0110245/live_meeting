@@ -84,10 +84,15 @@ function handleWebSocketMessage(data) {
 
         case 'transcript':
             // 전사 결과 수신
-            appendTranscript(data.text);
+            appendTranscript(data.text, data.transcript_id);
             // 버퍼 초기화
             bufferProgress.style.width = '0%';
             bufferText.textContent = '버퍼링: 0/5초';
+            break;
+
+        case 'transcript_update':
+            // [하이브리드 전략] LLM 교정 텍스트 수신
+            updateTranscript(data.transcript_id, data.text);
             break;
 
         case 'intermediate_summary':
@@ -403,7 +408,11 @@ function stopRecording() {
         recordingTimer = null;
     }
 
-    // 전체 전사 결과 표시
+    // 전체 전사 결과 표시 (DOM에서 최신 상태로 재구성)
+    fullTranscript = Array.from(document.querySelectorAll('.transcript-segment'))
+        .map(span => span.textContent.trim())
+        .join(' ');
+
     if (fullTranscript.trim()) {
         fullTranscriptSection.style.display = 'block';
         fullTranscriptEl.value = fullTranscript;
@@ -464,7 +473,7 @@ function updateTimer() {
 /**
  * 전사 결과 추가
  */
-function appendTranscript(text) {
+function appendTranscript(text, id) {
     if (!text.trim()) return;
 
     // 기존 placeholder 제거
@@ -476,6 +485,7 @@ function appendTranscript(text) {
     // 새 전사 결과 추가
     const span = document.createElement('span');
     span.className = 'transcript-segment';
+    if (id) span.dataset.id = id; // ID 저장 (교정용)
     span.textContent = text + ' ';
     span.style.animation = 'fadeIn 0.3s';
     transcriptContent.appendChild(span);
@@ -483,8 +493,34 @@ function appendTranscript(text) {
     // 자동 스크롤
     transcriptContent.scrollTop = transcriptContent.scrollHeight;
 
-    // 전체 전사에 추가
+    // fullTranscript는 stopRecording 시점에 DOM에서 다시 읽으므로 여기서는 생략 가능하지만
+    // 실시간 디버깅을 위해 일단 둠 (참조용)
     fullTranscript += text + ' ';
+}
+
+/**
+ * 전사 결과 업데이트 (LLM 교정)
+ */
+function updateTranscript(id, newText) {
+    if (!id || !newText) return;
+
+    const span = transcriptContent.querySelector(`.transcript-segment[data-id="${id}"]`);
+    if (span) {
+        // 텍스트 교체
+        span.textContent = newText + ' ';
+
+        // 시각적 피드백 (초록색 플래시)
+        span.style.transition = 'background-color 0.5s ease, color 0.5s ease';
+        span.style.backgroundColor = 'rgba(74, 222, 128, 0.2)'; // 연한 초록색 배경
+        span.style.color = '#4ade80'; // 초록색 텍스트
+
+        setTimeout(() => {
+            span.style.backgroundColor = 'transparent';
+            span.style.color = ''; // 원래 색상 복귀
+        }, 1500);
+
+        console.log(`Transcript corrected [${id}]: ${newText}`);
+    }
 }
 
 /**

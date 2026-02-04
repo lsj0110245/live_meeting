@@ -25,6 +25,7 @@ class LLMService:
             1. **오직 순수 JSON만 출력하세요.** (Markdown ```json ... ``` 태그 사용 금지)
             2. 모든 내용은 **한국어(Korean)**로 작성하세요.
             3. 분석이 불가능한 항목은 빈 문자열("")로 두세요.
+            4. **리스트 형태 표기 금지**: `['내용']`과 같은 형식은 절대 사용하지 마세요. 대신 `-`를 사용한 Markdown 불렛 포인트를 사용하세요.
             
             **출력 JSON 포맷:**
             {{
@@ -34,10 +35,10 @@ class LLMService:
                     "attendees": "식별된 참석자 목록 (쉼표로 구분)" 
                 }},
                 "summary": {{
-                    "purpose": "회의의 핵심 목적 (한 문장으로 명확히)",
-                    "content": "주요 논의 사항 (개조식, 중요도 순 정렬)",
-                    "conclusion": "최종 결론 및 합의 사항",
-                    "action_items": "향후 계획 및 담당자별 액션 아이템"
+                    "purpose": "📅 **요약**\\n회의의 핵심 목적 및 개요",
+                    "content": "📌 **주요 안건 및 내용**\\n- 안건 1\\n- 안건 2 (심층 분석 내용)",
+                    "conclusion": "✅ **결론 및 결정 사항**\\n- 확정된 내용...\\n- 합의된 사항...",
+                    "action_items": "📝 **향후 계획**\\n- [담당자] 할 일 1\\n- [담당자] 할 일 2"
                 }}
             }}
             """),
@@ -144,6 +145,40 @@ class LLMService:
         except Exception as e:
             error_msg = f"요약 생성 실패: {str(e)}"
             print(f"Simple Summary Error: {str(e)}")
-            return error_msg
+
+    async def correct_transcript(self, text: str) -> str:
+        """
+        STT 전사 텍스트의 오타 및 문맥 보정 (하이브리드 전략 2단계)
+        """
+        try:
+            prompt = f"""
+            당신은 전문 교정/윤문 AI입니다. 아래 텍스트는 음성 인식(STT) 결과물입니다. 발음이 비슷하여 잘못 인식된 단어나 문맥상 어색한 표현을 **원래 의미를 훼손하지 않는 선에서** 교정해주세요.
+
+            **교정 원칙:**
+            1. **사실 왜곡 금지**: 없는 내용을 지어내거나(Hallucination), 핵심 키워드를 함부로 바꾸지 마세요.
+            2. **문맥 기반 오타 수정**: "서버바 죽었다" -> "서버가 죽었다" 같이 명백한 오타만 수정하세요.
+            3. **전문 용어 보정**: "기터브", "파이썬" 등은 "GitHub", "Python" 처럼 정확한 영문/한글 표기로 고치세요.
+            4. **결과만 출력**: 설명이나 부연 없이 **교정된 텍스트만** 출력하세요. (JSON 사용 금지)
+
+            [원본 텍스트]:
+            {text}
+            """
+            
+            # JSON 모드 해제 (단순 텍스트 출력을 위해)
+            # 현재 self.llm 인스턴스는 JSON 출력을 선호할 수 있으므로, 
+            # 단순히 invoke 호출하되, 프롬프트에서 결과만 출력하도록 강력히 지시
+            
+            response = await self.llm.ainvoke(prompt)
+            corrected_text = response.content.strip()
+            
+            # 혹시라도 JSON이나 마크다운으로 감싸져 있으면 제거
+            if corrected_text.startswith('"') and corrected_text.endswith('"'):
+                corrected_text = corrected_text[1:-1]
+            
+            return corrected_text
+            
+        except Exception as e:
+            print(f"Transcript Correction Error: {str(e)}")
+            return text # 실패 시 원본 그대로 반환
 
 llm_service = LLMService()

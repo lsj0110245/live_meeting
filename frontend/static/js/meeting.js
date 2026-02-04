@@ -122,12 +122,31 @@ async function loadMeetingDetails() {
         }
 
         // 요약본 로딩 로직
-        if (meeting.summary) {
-            const summaryContent = document.getElementById('summary-content');
-            if (summaryContent) {
-                // 줄바꿈 처리
-                let htmlContent = meeting.summary.content.replace(/\n/g, '<br>');
+        const summaryContent = document.getElementById('summary-content');
+        if (summaryContent) {
+            if (meeting.summary) {
+                // 마크다운 스타일 처리 (헤더, 볼드, 불렛 포인트 처리)
+                let htmlContent = meeting.summary.content
+                    .replace(/^# (.*$)/gim, '<h2 style="margin-top:0;">$1</h2>')
+                    .replace(/^## (.*$)/gim, '<h3 style="margin-top:15px; color:var(--primary);">$1</h3>')
+                    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // 볼드 처리
+                    .replace(/^\- (.*$)/gim, '<li style="margin-left:20px; margin-bottom:5px;">$1</li>') // 불렛 리스트 처리
+                    .replace(/\n/g, '<br>');
                 summaryContent.innerHTML = htmlContent;
+            } else if (meeting.status === 'completed' || meeting.status === 'processing') {
+                summaryContent.innerHTML = `
+                    <div class="processing-state" style="text-align:center; padding:20px; color:var(--text-sub);">
+                        <i class="fa-solid fa-spinner fa-spin" style="font-size:2rem; margin-bottom:15px; color:var(--primary);"></i>
+                        <p>AI가 회의록을 정리하고 있습니다...<br><span style="font-size:0.8rem;">잠시만 기다려주세요. 하이라이트 분석 중입니다.</span></p>
+                    </div>
+                `;
+                // 5초 후 자동 새로고침 시도
+                setTimeout(() => {
+                    console.log("Retrying to load summary...");
+                    loadMeetingDetails();
+                }, 5000);
+            } else {
+                summaryContent.innerHTML = '<p class="placeholder-text">회의록이 아직 생성되지 않았습니다.</p>';
             }
         }
 

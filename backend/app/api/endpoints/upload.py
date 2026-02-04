@@ -13,6 +13,7 @@ from app.models.meeting import Meeting
 from app.models.transcript import Transcript
 from app.models.transcript import Transcript
 from app.services.stt_service import stt_service
+from app.services.llm_service import llm_service
 from app.services.progress_service import progress_service
 import asyncio
 
@@ -61,15 +62,31 @@ async def process_audio_file(meeting_id: int, file_path: str):
         segments = text if isinstance(text, list) else [{'start': 0.0, 'end': 0.0, 'text': str(text)}]
         
         for idx, seg in enumerate(segments):
+            original_text = seg.get('text', '')
+            
+            # [하이브리드 전략] LLM 문맥 교정 적용
+            # 파일 업로드는 실시간성이 덜 중요하므로, 정확도를 위해 모든 세그먼트 교정 시도
+            corrected_text = original_text
+            if original_text and len(original_text.strip()) > 5: # 너무 짧은 문장은 스킵
+                try:
+                    # from app.services.llm_service import llm_service # 상단 import 확인 필요
+                    corrected_text = await llm_service.correct_transcript(original_text)
+                except Exception as e:
+                    print(f"Correction failed for segment {idx}: {e}")
+
             transcript = Transcript(
                 meeting_id=meeting_id,
                 start_time=seg.get('start', 0.0),
                 end_time=seg.get('end', 0.0),
-                text=seg.get('text', ''),
+                text=corrected_text,
                 speaker="Speaker",
                 segment_index=idx
             )
             db.add(transcript)
+            
+            # 10개마다 커밋하여 진행 상황 저장 (선택 사항)
+            if idx % 10 == 0:
+                 db.commit()
             
         # 요약 생성을 위한 전체 텍스트 재구성 (stt_service 결과가 리스트이므로)
         full_text_for_summary = "\n".join([s.get('text', '') for s in segments])

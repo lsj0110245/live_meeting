@@ -13,6 +13,7 @@ from app.models.user import User
 from app.services.stt_service import stt_service
 from app.services.llm_service import llm_service
 import time
+import asyncio
 
 router = APIRouter()
 
@@ -267,11 +268,47 @@ async def websocket_endpoint(
                                         )
                                         db.add(transcript_record)
                                         db.commit()
+                                        db.refresh(transcript_record) # ID 확보
+                                        
+                                        current_transcript_id = transcript_record.id
                                         session.segment_index += 1
+                                        
+                                        # [하이브리드 전략 2단계] 비동기 LLM 교정 태스크 실행
+                                        async def background_correction_task(tid: int, original_text: str, cid: str):
+                                            try:
+                                                # LLM 문맥 교정
+                                                corrected = await llm_service.correct_transcript(original_text)
+                                                
+                                                if corrected and corrected != original_text:
+                                                    # DB 업데이트
+                                                    # 주의: 메인 루프의 db 세션과 충돌 방지를 위해 별도 세션 사용 권장
+                                                    # 여기서는 간단히 메인 세션과 분리된 로직이 필요하므로 SessionLocal 사용
+                                                    correction_db = SessionLocal()
+                                                    try:
+                                                        t_item = correction_db.query(Transcript).filter(Transcript.id == tid).first()
+                                                        if t_item:
+                                                            t_item.text = corrected
+                                                            correction_db.commit()
+                                                            print(f"Transcript {tid} corrected: {original_text} -> {corrected}")
+                                                            
+                                                            # 클라이언트에 업데이트 전송
+                                                            await manager.send_json(cid, {
+                                                                "type": "transcript_update",
+                                                                "transcript_id": tid,
+                                                                "text": corrected
+                                                            })
+                                                    finally:
+                                                        correction_db.close()
+                                            except Exception as e:
+                                                print(f"Background correction failed: {e}")
+
+                                        # 태스크 스폰
+                                        asyncio.create_task(background_correction_task(current_transcript_id, transcript, client_id))
                                     
-                                    # 클라이언트에 전사 결과 전송
+                                    # 클라이언트에 1차 전사 결과 전송 (ID 포함)
                                     await manager.send_json(client_id, {
                                         "type": "transcript",
+                                        "transcript_id": current_transcript_id,
                                         "text": transcript,
                                         "is_final": True
                                     })
@@ -410,14 +447,32 @@ async def websocket_endpoint(
                             # 요약 저장
                             if "summary" in summary_json:
                                 from app.models.summary import Summary
-                                summary_content = json.dumps(summary_json["summary"], ensure_ascii=False)
+                                s_data = summary_json["summary"]
+                                
+                                # 필드들을 하나의 마크다운 문서로 합침
+                                formatted_parts = []
+                                # 제목 추가 (메타데이터 활용)
+                                final_title = metadata.get("title_suggestion", meeting.title if meeting else "회의")
+                                formatted_parts.append(f"# {final_title} 회의록\n")
+                                
+                                if s_data.get("purpose"):
+                                    formatted_parts.append(f"{s_data['purpose']}")
+                                if s_data.get("content"):
+                                    formatted_parts.append(f"\n{s_data['content']}")
+                                if s_data.get("conclusion"):
+                                    formatted_parts.append(f"\n{s_data['conclusion']}")
+                                if s_data.get("action_items"):
+                                    formatted_parts.append(f"\n{s_data['action_items']}")
+                                
+                                summary_content = "\n".join(formatted_parts)
+                                
                                 existing = bg_db.query(Summary).filter(Summary.meeting_id == mid).first()
                                 if existing:
                                     existing.content = summary_content
                                 else:
                                     bg_db.add(Summary(meeting_id=mid, content=summary_content))
                                 bg_db.commit()
-                                print(f"Final summary saved for meeting {mid}.")
+                                print(f"Final structured summary saved for meeting {mid}.")
                 except Exception as e:
                     print(f"Final cleanup task failed: {e}")
                 finally:
