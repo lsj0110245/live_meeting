@@ -185,7 +185,6 @@ async def _generate_summary_with_chunking(title: str, full_text: str) -> dict:
     """
     긴 텍스트를 청킹하여 Map-Reduce 방식으로 요약 생성
     """
-    from app.services.llm_service import llm_service
     
     # 청킹 설정
     CHUNK_SIZE = 3000  # 3000자 청크
