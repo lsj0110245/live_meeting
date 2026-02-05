@@ -24,9 +24,9 @@ async def process_meeting_summary(meeting_id: int):
         # 2. LLM 요약 생성 (Llama 3.1 - 128k Context)
         print(f"회의록 생성 중... 회의 ID: {meeting_id}, 텍스트 길이: {len(full_text)}자")
         
-        # [안전장치] 128k 토큰(약 30만자)을 넘을 수도 있으므로 안전하게 10만자 기준으로 분기
-        # 대부분은 통짜 처리가 정확도가 높음. 아주 긴 경우만 청킹.
-        SAFETY_LIMIT = 100000 
+        # [안전장치] 텍스트가 너무 길면 AI가 멈출 수 있으므로 10,000자 기준으로 분기
+        # 10,000자 이하는 통째로, 그 이상은 청킹하여 처리
+        SAFETY_LIMIT = 10000 
         
         if len(full_text) > SAFETY_LIMIT:
              print(f"[Safe Mode] 텍스트가 매우 깁니다({len(full_text)}자). 안전을 위해 Map-Reduce 전략 적용")

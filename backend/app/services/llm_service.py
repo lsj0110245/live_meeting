@@ -12,8 +12,8 @@ class LLMService:
             model=settings.LLM_MODEL,
             temperature=settings.LLM_TEMPERATURE,
             # format="json",  # 전역 JSON 모드는 가끔 행(Hang)을 유발하므로 해제
-            num_ctx=8192,
-            timeout=300.0
+            num_ctx=16384,
+            timeout=600.0
         )
         
         # 회의록 요약 프롬프트 템플릿 (JSON 출력) - EXAONE 3.5 최적화
