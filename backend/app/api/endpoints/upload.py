@@ -22,7 +22,6 @@ router = APIRouter()
 from app.db.session import SessionLocal
 
 from app.services.meeting_tasks import process_meeting_summary
-from app.services.task_manager import task_manager
 
 
 async def process_audio_file(meeting_id: int, file_path: str):
@@ -112,9 +111,6 @@ async def process_audio_file(meeting_id: int, file_path: str):
         progress_service.set_progress(meeting_id, 100) # 완료
         print(f"✅ [BG TASK] AI summary completed for Meeting {meeting_id}")
         
-    except asyncio.CancelledError:
-        print(f"🛑 [BG TASK] Cancelled for Meeting ID: {meeting_id}")
-        # 취소 시 별도 DB 업데이트 하지 않음 (보통 삭제 시 취소되므로)
     except Exception as e:
         print(f"❌ [BG TASK ERROR] Meeting {meeting_id}: {type(e).__name__} - {str(e)}")
         import traceback
@@ -229,8 +225,7 @@ async def upload_file(
     
     # 5. Background Task로 STT 서비스 호출 (중복 여부와 관계없이 항상 실행)
     print(f"📋 [UPLOAD] Scheduling background task for Meeting ID: {meeting.id}")
-    # task_manager를 통해 작업 등록 (취소 가능하도록)
-    task_manager.add_task(meeting.id, process_audio_file(meeting.id, file_path))
+    background_tasks.add_task(run_process_audio_file, meeting.id, file_path)
     
     return {
         "meeting_id": meeting.id,
@@ -276,7 +271,7 @@ async def finalize_recording(
         db.commit()
 
         # [고도화 하이브리드] Whisper 엔진을 이용한 전체 오디오 정밀 재분석 시작
-        task_manager.add_task(meeting_id, process_audio_file(meeting_id, str(file_path)))
+        background_tasks.add_task(run_process_audio_file, meeting_id, str(file_path))
         
         return {"status": "success", "message": "Recording finalized, re-transcription started"}
     except Exception as e:

@@ -19,7 +19,6 @@ router = APIRouter()
 from app.db.session import SessionLocal
 
 from app.services.meeting_tasks import process_meeting_summary
-from app.services.task_manager import task_manager
 
 router = APIRouter()
 
@@ -107,8 +106,8 @@ def generate_summary(
     meeting.status = "processing"
     db.commit()
     
-    # Background Task 실행 (TreeMap 관리)
-    task_manager.add_task(meeting.id, process_meeting_summary(meeting.id))
+    # Background Task 실행
+    background_tasks.add_task(process_meeting_summary, meeting.id)
     
     return {"message": "회의록 생성이 요청되었습니다. 잠시 후 확인해주세요."}
 
@@ -147,10 +146,10 @@ def retry_analysis(
     meeting.status = "processing"
     db.commit()
     
-    # 백그라운드 작업 재시작
-    from app.api.endpoints.upload import process_audio_file
-    # 재분석 시작 (Async Task)
-    task_manager.add_task(meeting.id, process_audio_file(meeting.id, meeting.audio_file_path))
+    # 백그라운드 작업 재시작 (upload.py의 process_audio_file 재사용)
+    from app.api.endpoints.upload import run_process_audio_file
+    # 재분석 시작 (sync 래퍼 사용)
+    background_tasks.add_task(run_process_audio_file, meeting.id, meeting.audio_file_path)
     
     return {"message": "재분석이 시작되었습니다. 잠시 후 확인해주세요."}
 
@@ -318,9 +317,6 @@ def bulk_delete_meetings(
     import os
     
     for meeting in meetings:
-        # 진행 중인 작업 취소
-        task_manager.cancel_task(meeting.id)
-        
         # 파일 삭제 logic
         if meeting.audio_file_path:
             file_path = meeting.audio_file_path
