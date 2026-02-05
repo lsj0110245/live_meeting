@@ -48,15 +48,19 @@ class FasterWhisperSTTService:
         self._initialize_model()
         
         try:
-            # Faster-Whisper는 beam_size로 정확도 조절
+            # [최적화] 파일 전사 정확도 극대화 설정
             segments, info = self.model.transcribe(
                 file_path,
                 language=language,
-                beam_size=5,  # 정확도 우선
-                initial_prompt="이것은 비즈니스 회의 녹음입니다. 자연스러운 한국어로 전사해주세요. 추임새는 제외하고, 전문 용어(LLM, SaaS, API, Docker, FastAPI, WebSocket, Backend, Frontend, Git, DB, SQL, Python, JavaScript 등)는 정확한 영문 표기를 유지해주세요.", # 문맥 가이드 추가
-                vad_filter=True,  # 음성 구간 자동 감지
+                beam_size=10,         # 오프라인 처리는 더 깊게 탐색 (5 -> 10)
+                best_of=10,           # 최상의 결과 선별
+                temperature=0,        # 일관성 최우선
+                repetition_penalty=1.2, # 중복 방지
+                condition_on_previous_text=True, # [중요] 오프라인 전사는 이전 문맥을 참조하여 전체 일관성 향상
+                initial_prompt="비즈니스 회의 전문 녹음입니다. IT 전문 용어와 고유 명사는 영문 표기를 유지하고, 문맥에 맞는 자연스러운 한국어로 전사하세요.",
+                vad_filter=True,
                 vad_parameters=dict(
-                    min_silence_duration_ms=1000, # 침묵 감지 기준 상향 (500 -> 1000)
+                    min_silence_duration_ms=1000, 
                     speech_pad_ms=400
                 )
             )
@@ -111,31 +115,33 @@ class FasterWhisperSTTService:
             temp_path = f.name
         
             try:
-                # 실시간용 파라미터 고도화
+                # [최적화] 실시간 정확도 및 속도 극대화 설정
                 segments, info = self.model.transcribe(
                     temp_path,
                     language=language,
-                    beam_size=3,  # 정확도와 속도 균형 (1 -> 3)
-                    condition_on_previous_text=False, # 환각 및 반복 전파 방지
-                    initial_prompt="비즈니스 회의입니다. API, Docker, LLM, OAuth, AES-256, Microservice, Governance 등 전문 용어는 영문 표기를 유지하세요.",
+                    beam_size=5,          # 정확도 극대화 (최상위 품질)
+                    best_of=5,            # 최고 결과 선택
+                    temperature=0,        # 결정론적 결과로 속도 및 안정성 확보
+                    repetition_penalty=1.2, # 반복 문구 억제
+                    no_repeat_ngram_size=3, # 반복되는 단어 조합 억제
+                    condition_on_previous_text=False, # 이전 문맥 참조에 의한 환각 전파 방지
+                    initial_prompt="회의 녹음입니다. IT 기술 용어(LLM, GPT, API, Docker, FastAPI, SQL, JSON)는 정확히 영문으로 표기하고 자연스러운 한국어로 작성하세요.",
                     vad_filter=True,
                     vad_parameters=dict(
-                        min_silence_duration_ms=1000,
-                        speech_pad_ms=400
+                        min_silence_duration_ms=500, # 반응성 상향 (빨리 인식 완료)
+                        speech_pad_ms=400,
+                        min_speech_duration_ms=250   # 짧은 말도 인식
                     )
                 )
 
                 transcript_text = ""
                 for segment in segments:
-                    # [후처리] 환각 패턴 및 무의미한 반복 제거
                     text = segment.text.strip()
                     
-                    # 1. 특정 환각 패턴 (박진희 자막 등) 제거
-                    if re.search(r"자막|박진희|vostfr|Subtitles|Thank you", text, re.I):
+                    # [필터링] 환각 패턴 제거
+                    if re.search(r"자막|박진희|vostfr|Subtitles|Thank you|시청해 주셔서", text, re.I):
                         continue
                     
-                    # 2. 너무 짧거나 의미 없는 추임새 (감사합니다 등 반복) 필터링
-                    # (실시간 청크에서는 무음 시 환각으로 자주 발생함)
                     if len(text) <= 1:
                         continue
                         
@@ -174,10 +180,10 @@ class FasterWhisperSTTService:
             total_duration_sec = total_duration_ms / 1000.0
             print(f"오디오 길이: {total_duration_sec:.2f}초")
             
-            # 청킹 설정
-            CHUNK_LENGTH_MS = 10000  # 10초
-            OVERLAP_MS = 2000        # 2초 오버랩
-            STEP_MS = CHUNK_LENGTH_MS - OVERLAP_MS  # 8초씩 이동
+            # 청킹 설정 (문맥 유지를 위해 30초 단위로 상향)
+            CHUNK_LENGTH_MS = 30000  # 30초
+            OVERLAP_MS = 5000        # 5초 오버랩
+            STEP_MS = CHUNK_LENGTH_MS - OVERLAP_MS
             
             all_segments = []
             chunk_count = 0
@@ -194,12 +200,16 @@ class FasterWhisperSTTService:
                     chunk.export(temp_path, format="wav")
                 
                 try:
-                    # Whisper 전사
+                    # [최적화] 청킹 전사 정확도 극대화
                     segments, info = self.model.transcribe(
                         temp_path,
                         language=language,
-                        beam_size=5,
-                        initial_prompt="이것은 비즈니스 회의 녹음입니다. 자연스러운 한국어로 전사해주세요. 추임새는 제외하고, 전문 용어(LLM, SaaS, API, Docker, FastAPI, WebSocket, Backend, Frontend, Git, DB, SQL, Python, JavaScript 등)는 정확한 영문 표기를 유지해주세요.",
+                        beam_size=10,
+                        best_of=5,
+                        temperature=0,
+                        repetition_penalty=1.2,
+                        condition_on_previous_text=True, # 청크 간 문맥 유지
+                        initial_prompt="회의 녹음입니다. 전문 용어 표기를 정확히 하고 자연스러운 문장으로 기록하세요.",
                         vad_filter=True,
                         vad_parameters=dict(
                             min_silence_duration_ms=1000,

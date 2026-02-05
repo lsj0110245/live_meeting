@@ -236,12 +236,14 @@ async def upload_file(
 @router.post("/recording/{meeting_id}/finalize")
 async def finalize_recording(
     meeting_id: int,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(deps.get_current_user)
 ):
     """
-    실시간 녹음 종료 후 완성된 오디오 파일을 업로드하여 기존 파일을 교체 (메타데이터 복구)
+    실시간 녹음 종료 후 완성된 오디오 파일을 업로드하여 기존 파일을 교체하고,
+    고품질 전사를 위해 Whisper로 전체 재분석을 수행합니다.
     """
     meeting = db.query(Meeting).filter(Meeting.id == meeting_id, Meeting.owner_id == current_user.id).first()
     if not meeting:
@@ -252,7 +254,7 @@ async def finalize_recording(
         raise HTTPException(status_code=400, detail="Invalid audio format")
 
     try:
-        # 파일 저장 경로 (기존 파일명 유지 또는 새 이름)
+        # 파일 저장 경로
         filename = f"realtime_{meeting_id}.webm"
         file_path = settings.MEDIA_ROOT / filename
         
@@ -260,14 +262,18 @@ async def finalize_recording(
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        print(f"✅ [Finalize] Audio file for meeting {meeting_id} replaced with indexed version.")
+        print(f"✅ [Finalize] Audio file for meeting {meeting_id} saved. Starting re-transcription...")
         
-        # DB 경로 업데이트 (이미 같은 경로일 수 있지만 확인 차원)
+        # DB 업데이트 및 상태를 'processing'으로 변경 (재분석 중임을 표시)
         meeting.audio_file_path = f"media/{filename}"
-        meeting.status = "completed" # 최종 완료 상태 보장
+        meeting.status = "processing"
         db.commit()
+
+        # [고도화 하이브리드] Whisper 엔진을 이용한 전체 오디오 정밀 재분석 시작
+        background_tasks.add_task(run_process_audio_file, meeting_id, str(file_path))
         
-        return {"status": "success", "message": "Recording finalized"}
+        return {"status": "success", "message": "Recording finalized, re-transcription started"}
     except Exception as e:
         print(f"❌ [Finalize] Failed: {e}")
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

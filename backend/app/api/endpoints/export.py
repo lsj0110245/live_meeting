@@ -13,6 +13,7 @@ import io
 import pandas as pd
 from datetime import datetime
 import openpyxl
+from urllib.parse import quote
 
 router = APIRouter()
 
@@ -127,7 +128,8 @@ def export_meeting(
             iter([stream.getvalue().encode('utf-8-sig')]), 
             media_type="text/csv; charset=utf-8"
         )
-        response.headers["Content-Disposition"] = f"attachment; filename={filename}.csv"
+        encoded_filename = quote(filename)
+        response.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{encoded_filename}.csv"
         return response
         
     elif format == "xlsx":
@@ -187,7 +189,8 @@ def export_meeting(
             iter([stream.getvalue()]), 
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-        response.headers["Content-Disposition"] = f"attachment; filename={filename}.xlsx"
+        encoded_filename = quote(filename)
+        response.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{encoded_filename}.xlsx"
         return response
         
     else:

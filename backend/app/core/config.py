@@ -44,10 +44,14 @@ class Settings(BaseSettings):
     ALLOWED_EXTENSIONS: str = "mp3,wav,m4a,mp4,webm,avi,mov"
     
     # STT 설정 (인식 부하 및 VRAM 관리를 위해 medium 권장)
+    STT_ENGINE: str = "faster-whisper"  # faster-whisper 전용
     STT_LANGUAGE: str = "ko-KR"
     STT_MODEL_SIZE: str = "deepdml/faster-whisper-large-v3-turbo-ct2"  # 고품질 인식을 위해 large-v3-turbo 사용
     STT_DEVICE: str = "cuda"
     STT_COMPUTE_TYPE: str = "float16"
+
+    # LLM 설정 (Ollama)
+    LLM_MODEL: str = "gemma2"  # Ollama 모델명 (Gemma 2 사용)
     
     # 스토리지 설정
     STORAGE_TYPE: str = "local"  # or "s3"
