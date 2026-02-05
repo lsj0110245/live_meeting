@@ -6,7 +6,7 @@ from app.core.config import settings
 
 class LLMService:
     def __init__(self):
-        # Local Llama 3 (Ollama) 초기화
+        # Local EXAONE 3.5 (Ollama) 초기화
         self.llm = ChatOllama(
             base_url=settings.OLLAMA_BASE_URL,
             model=settings.LLM_MODEL,
@@ -126,26 +126,19 @@ class LLMService:
             # 임시로 format 해제는 불가하므로 JSON으로 유도 후 content 추출
             
             prompt = f"""
-다음 회의 내용을 3줄 이내로 핵심만 요약해줘.
-결과는 JSON 형식으로 반환해.
-포맷: {{ "summary": "요약 내용..." }}
-
-[회의 내용]
-{text}
-"""
-            response = await self.llm.ainvoke(prompt)
-            content = response.content.strip()
+            다음 회의 내용을 **핵심만 요약하여 3줄 이내로** 작성해주세요.
             
-            # JSON 추출 시도
-            try:
-                import re
-                json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                if json_match:
-                    data = json.loads(json_match.group(0))
-                    return data.get("summary", content)
-                return content
-            except:
-                return content
+            [원칙]
+            1. 문장의 끝은 "함", "임" 등으로 간결하게 끝내세요.
+            2. JSON 형식을 쓰지 말고, **순수한 텍스트**로 출력하세요.
+            3. 불필요한 서두나 사족을 붙이지 마세요.
+
+            [회의 내용]
+            {text}
+            """
+            response = await self.llm.ainvoke(prompt)
+            # EXAONE은 지시를 잘 따르므로 바로 텍스트 반환
+            return response.content.strip()
                 
         except Exception as e:
             error_msg = f"요약 생성 실패: {str(e)}"
@@ -157,22 +150,17 @@ class LLMService:
         """
         try:
             prompt = f"""
-            당신은 전문 교정/윤문 AI입니다. 아래 텍스트는 음성 인식(STT) 결과물입니다. 발음이 비슷하여 잘못 인식된 단어나 문맥상 어색한 표현을 **원래 의미를 훼손하지 않는 선에서** 교정해주세요.
+            당신은 전문 교정 AI입니다. 아래 STT(음성 인식) 텍스트의 오타를 문맥에 맞게 수정하여 출력하십시오.
 
-            **교정 원칙:**
-            1. **사실 왜곡 금지**: 없는 내용을 지어내거나(Hallucination), 핵심 키워드를 함부로 바꾸지 마세요.
-            2. **문맥 기반 오타 및 수치 보정**: 
-               - "서버바 죽었다" -> "서버가 죽었다"
-               - 음성 인식 특성상 숫자가 틀릴 수 있으니 문맥상 자연스러운 수치로 교정 (예: "사억 팔천오백만" -> "4억 8,500만")
-            3. **전문 용어 집중 보정**: 
-               - "에이아이 오류", "에이이에스" -> "AES-256"
-               - "오와스", "오오스" -> "OAuth"
-               - "커버넌스" -> "거버넌스"
-               - "기터브", "파이썬" 등은 "GitHub", "Python" 처럼 정확한 영문/한글 표기로 고치세요.
-            4. **결과만 출력**: 설명이나 부연 없이 **교정된 텍스트만** 출력하세요. (JSON 사용 금지)
-            5. **키워드 태깅**: 문장의 핵심 주제를 나타내는 단어 1개를 선정하여 문장 맨 앞에 `[키워드]` 형태로 붙여주세요.
-               - 예시: "OAuth 인증 체크해" -> "[보안] OAuth 인증 체크해"
-               - 예시: "매출이 올랐어" -> "[매출] 매출이 올랐어"
+            **[교정 원칙]**
+            1. **사실 유지**: 내용은 절대 변경하지 말고, 명백한 발음 오류만 수정하십시오.
+            2. **용어 보정**: 
+               - "에이아이" -> "AI", "쥐피티" -> "GPT", "도커" -> "Docker" 등 IT 전문 용어는 올바른 표기로 수정하십시오.
+            3. **문맥 보정**:
+               - "서버바" -> "서버가", "사억" -> "4억" 등 문법과 수치를 자연스럽게 다듬으십시오.
+            4. **출력 형식**: 
+               - 부연 설명 없이 **수정된 텍스트만** 출력하십시오.
+               - 문장 맨 앞에 핵심 주제 키워드를 `[키워드]` 형태로 추가하십시오. (예: `[보안] OAuth 인증 이슈가...`)
 
             [원본 텍스트]:
             {text}

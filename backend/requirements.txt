@@ -23,6 +23,8 @@ langchain-core>=0.1.0
 faster-whisper>=1.0.0
 torch>=2.0.0  # CUDA GPU 메모리 관리용
 pydub>=0.25.1  # 오디오 청킹 및 처리
+noisereduce>=2.0.0  # 오디오 잡음 제거
+scipy>=1.10.0  # 신호 처리 지원
 
 # WebSocket (실시간 통신)
 websockets==12.0

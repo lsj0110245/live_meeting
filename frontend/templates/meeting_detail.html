@@ -56,7 +56,18 @@
         </div>
 
         <div class="card transcript-card">
-            <h3>전사 스크립트</h3>
+            <div class="transcript-header"
+                style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h3 style="margin-bottom: 0;">전사 스크립트</h3>
+                <div class="transcript-controls" style="display: flex; gap: 10px;">
+                    <input type="text" id="transcript-search" placeholder="키워드 검색..." class="form-input"
+                        style="padding: 5px 10px; font-size: 0.9em; width: 150px;">
+                    <select id="transcript-sort" class="form-select" style="padding: 5px; font-size: 0.9em;">
+                        <option value="asc">시간순 (오래된순)</option>
+                        <option value="desc">최신순</option>
+                    </select>
+                </div>
+            </div>
             <div id="transcript-list" class="transcript-list">
                 <!-- 스크립트 아이템들이 여기에 추가됨 -->
                 <p class="placeholder-text">전사 데이터를 불러오는 중...</p>

@@ -96,70 +96,178 @@ class FasterWhisperSTTService:
         실시간 전사 (속도 우선)
         
         Args:
-            audio_bytes: 오디오 데이터 (bytes)
-            language: 언어 코드
-            
-        Returns:
-            전사된 텍스트
+        실시간 오디오 스트림 전사
         """
-        # 데이터 유효성 검사 (너무 작으면 스킵)
-        if not audio_bytes or len(audio_bytes) < 1024:  # 1KB 미만은 무시
-            print(f"Skipping tiny audio chunk: {len(audio_bytes)} bytes")
+        if not audio_bytes or len(audio_bytes) < 1024:
+            # print(f"Skipping tiny audio chunk: {len(audio_bytes)} bytes")
             return ""
 
         self._initialize_model()
         
-        # bytes를 임시 파일로 저장
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            f.write(audio_bytes)
-            temp_path = f.name
+        # [공통 전처리] Denoise & Normalize 적용
+        # 실시간 모드이므로 빠른 처리를 위해 quality="fast" 적용
+        # Blocking 방지를 위해 별도 스레드에서 실행
+        import asyncio
+        temp_path = None
+        try:
+             temp_path = await asyncio.to_thread(self._preprocess_audio, audio_bytes, quality="fast")
+        except Exception as e:
+             # 전처리 실패 시 로그 남기고, 원본을 임시 파일로 저장하여 계속 진행 시도
+             print(f"!! Preprocessing Critical Error: {e}")
+             import tempfile
+             with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
+                 f.write(audio_bytes)
+                 temp_path = f.name
         
-            try:
-                # [최적화] 실시간 정확도 및 속도 극대화 설정
-                segments, info = self.model.transcribe(
-                    temp_path,
-                    language=language,
-                    beam_size=5,          # 정확도 극대화 (최상위 품질)
-                    best_of=5,            # 최고 결과 선택
-                    temperature=0,        # 결정론적 결과로 속도 및 안정성 확보
-                    repetition_penalty=1.2, # 반복 문구 억제
-                    no_repeat_ngram_size=3, # 반복되는 단어 조합 억제
-                    condition_on_previous_text=False, # 이전 문맥 참조에 의한 환각 전파 방지
-                    initial_prompt="회의 녹음입니다. IT 기술 용어(LLM, GPT, API, Docker, FastAPI, SQL, JSON)는 정확히 영문으로 표기하고 자연스러운 한국어로 작성하세요.",
-                    vad_filter=True,
-                    vad_parameters=dict(
-                        min_silence_duration_ms=500, # 반응성 상향 (빨리 인식 완료)
-                        speech_pad_ms=400,
-                        min_speech_duration_ms=250   # 짧은 말도 인식
-                    )
+        try:
+            # [최적화] 실시간 정확도 및 속도 극대화 설정
+            segments, info = self.model.transcribe(
+                temp_path,
+                language=language,
+                beam_size=5,
+                best_of=5,
+                temperature=0,
+                repetition_penalty=1.2,
+                no_repeat_ngram_size=3,
+                condition_on_previous_text=False,
+                initial_prompt="회의 녹음입니다. IT 기술 용어(LLM, GPT, API, Docker, FastAPI, SQL, JSON)는 정확히 영문으로 표기하고 자연스러운 한국어로 작성하세요.",
+                vad_filter=True,
+                vad_parameters=dict(
+                    min_silence_duration_ms=500,
+                    speech_pad_ms=500,          
+                    min_speech_duration_ms=100, 
+                    threshold=0.3               
+                )
+            )
+
+            transcript_text = ""
+            for segment in segments:
+                text = segment.text.strip()
+                # print(f"Detected Segment: {text}") # 디버그용
+                    
+                # [필터링] 환각 패턴 제거
+                if re.search(r"자막|박진희|vostfr|Subtitles|Thank you|시청해 주셔서", text, re.I):
+                    continue
+                
+                if len(text) <= 1:
+                    continue
+                    
+                transcript_text += text + " "
+
+            if not segments:
+                print(f"Realtime STT: No segments detected for audio chunk (length: {len(audio_bytes)} bytes)")
+            # if transcript_text.strip():
+            #      print(f"Final Transcript: {transcript_text}")
+                 
+            return transcript_text.strip()
+ 
+        except Exception as e:
+            if "Invalid data found" in str(e):
+                # 잡음/무음 구간에서 발생하는 에러 무시
+                return ""
+            print(f"Realtime STT Internal Error: {e}")
+            raise e
+            
+        finally:
+            # 임시 파일 삭제
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def _preprocess_audio(self, audio_data: bytes | str, quality: str = "fast") -> str:
+        """
+        오디오 전처리: 잡음 제거(Denoise) 및 증폭(Normalize)
+        - audio_data: bytes(실시간) 또는 str(파일 경로)
+        - quality: "fast"(실시간용) 또는 "high"(파일전사용)
+        - Returns: 전처리된 WAV 임시 파일 경로
+        """
+        import tempfile
+        import os
+        try:
+            import numpy as np
+            import noisereduce as nr
+            from pydub import AudioSegment, effects
+
+            print(f"Preprocessing start... Quality: {quality}")
+
+            # 1. 입력 데이터 로드 -> AudioSegment
+            if isinstance(audio_data, str): # 파일 경로인 경우
+                print(f"  Loading audio from file: {audio_data}")
+                original_audio = AudioSegment.from_file(audio_data)
+                raw_path = None
+            else: # bytes인 경우 (실시간)
+                print(f"  Loading audio from bytes (length: {len(audio_data)} bytes)")
+                # WebM 등 포맷 헤더 문제 가능성 -> raw 저장 후 pydub 로드 시도
+                with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
+                    f.write(audio_data)
+                    raw_path = f.name
+                
+                # 매우 중요: WebM 스트림은 지속 시간이 없거나 헤더가 꼬일 수 있음.
+                # format="webm" 명시 또는 ffmpeg 프로브 필요할 수 있음.
+                original_audio = AudioSegment.from_file(raw_path)
+
+            print(f"  Audio Loaded. Duration: {len(original_audio)}ms")
+
+            # 2. AudioSegment -> Numpy Array 변환
+            original_audio = original_audio.set_frame_rate(16000).set_channels(1)
+            samples = np.array(original_audio.get_array_of_samples())
+            
+            # 3. [Denoise] 잡음 제거
+            print("  Denoising audio...")
+            if quality == "high": # 파일 전사용 (꼼꼼하게)
+                reduced_noise_audio = nr.reduce_noise(
+                    y=samples, sr=16000, 
+                    stationary=True, 
+                    prop_decrease=0.90, # 90% 제거
+                    n_std_thresh_stationary=1.5
+                )
+            else: # 실시간용 (적당히)
+                reduced_noise_audio = nr.reduce_noise(
+                    y=samples, sr=16000, 
+                    stationary=True, 
+                    prop_decrease=0.75, # 75% 제거
+                    n_std_thresh_stationary=1.5
                 )
 
-                transcript_text = ""
-                for segment in segments:
-                    text = segment.text.strip()
-                    
-                    # [필터링] 환각 패턴 제거
-                    if re.search(r"자막|박진희|vostfr|Subtitles|Thank you|시청해 주셔서", text, re.I):
-                        continue
-                    
-                    if len(text) <= 1:
-                        continue
-                        
-                    transcript_text += text + " "
+            # 4. Numpy -> AudioSegment 복원
+            denoised_segment = AudioSegment(
+                reduced_noise_audio.tobytes(), 
+                frame_rate=16000,
+                sample_width=original_audio.sample_width, 
+                channels=1
+            )
 
-                return transcript_text.strip()
+            # 5. [Normalize] 증폭 및 평준화
+            print("  Normalizing audio...")
+            denoised_segment = effects.normalize(denoised_segment)
+            denoised_segment = denoised_segment + 5 # +5dB 추가 확보
 
-            except Exception as e:
-                if "Invalid data found" in str(e):
-                    # 잡음/무음 구간에서 발생하는 에러 무시
-                    return ""
-                print(f"Realtime STT Internal Error: {e}")
-                raise e
+            # 결과 저장
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                temp_path = f.name
+                denoised_segment.export(temp_path, format="wav")
             
-            finally:
-                # 임시 파일 삭제
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
+            print(f"Preprocessing Done. Saved to {temp_path}")
+
+            # 임시 파일 정리
+            if raw_path and os.path.exists(raw_path):
+                os.remove(raw_path)
+                
+            return temp_path
+
+        except Exception as e:
+            print(f"!! Preprocessing Failed: {e}")
+            # 실패 시 안전하게 원본 유지 (fallback)
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                if isinstance(audio_data, bytes):
+                    f.write(audio_data)
+                    print(f"  Fallback: Saved raw bytes to {f.name}")
+                    return f.name
+                else: 
+                    # 파일인 경우 그냥 원본 경로 복사하거나 그대로 사용해야 하는데
+                    # 여기선 안전하게 pydub로 읽어서 wav 저장
+                    # AudioSegment.from_file(audio_data).export(f.name, format="wav")
+                    print(f"  Fallback: Using original file path {audio_data}")
+                    return str(audio_data)
     
     async def transcribe_file_chunked(self, file_path: str, language: str = "ko", progress_callback=None) -> list:
         """
@@ -169,13 +277,23 @@ class FasterWhisperSTTService:
         print(f"[청킹 전사 시작] {file_path}")
         self._initialize_model()
         
+        cleaned_path = None
         try:
+            # [전처리] 파일 모드용 고품질 Denoise & Normalize 적용
+            # CPU 연산량이 많으므로 별도 스레드에서 실행 (Non-blocking)
+            import asyncio
+            print(f"[전처리 중] 잡음 제거 및 오디오 증폭...")
+            cleaned_path = await asyncio.to_thread(self._preprocess_audio, file_path, quality="high")
+            
             from pydub import AudioSegment
             import tempfile
             import os
             
-            # 오디오 파일 로드
-            audio = AudioSegment.from_file(file_path)
+            # 오디오 파일 로드 (전처리된 파일 사용)
+            if cleaned_path:
+                 audio = AudioSegment.from_file(cleaned_path)
+            else:
+                 audio = AudioSegment.from_file(file_path)
             total_duration_ms = len(audio)
             total_duration_sec = total_duration_ms / 1000.0
             print(f"오디오 길이: {total_duration_sec:.2f}초")

@@ -20,7 +20,8 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     
     # LLM 설정 (Ollama)
-    LLM_MODEL: str = "llama3.1:latest"  # Ollama 모델명 (태그 명시)
+    LLM_MODEL: str = "exaone3.5:7.8b"  # Ollama 모델명
+
     LLM_MAX_TOKENS: int = 4096
     LLM_TEMPERATURE: float = 0.3  # LLM 온도 설정
     OLLAMA_BASE_URL: str = "http://llm:11434"  # Docker 내부 통신
@@ -51,7 +52,7 @@ class Settings(BaseSettings):
     STT_COMPUTE_TYPE: str = "float16"
 
     # LLM 설정 (Ollama)
-    LLM_MODEL: str = "gemma2"  # Ollama 모델명 (Gemma 2 사용)
+    LLM_MODEL: str = "exaone3.5:7.8b"  # Ollama 모델명 (EXAONE 3.5 사용)
     
     # 스토리지 설정
     STORAGE_TYPE: str = "local"  # or "s3"

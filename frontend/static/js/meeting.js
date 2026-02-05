@@ -78,67 +78,106 @@ async function loadMeetingDetails() {
             }
         }
 
+        // 전사 스크립트 UI 초기화 및 이벤트 바인딩
         const transcriptList = document.getElementById('transcript-list');
+        const searchInput = document.getElementById('transcript-search');
+        const sortSelect = document.getElementById('transcript-sort');
+
         if (transcriptList) {
-            if (meeting.transcripts && meeting.transcripts.length > 0) {
-                transcriptList.innerHTML = ''; // 초기화
+            // 초기 렌더링
+            renderTranscripts(meeting.transcripts);
 
-                // 시간순(오름차순)으로 정렬
-                const sortedTranscripts = [...meeting.transcripts].sort((a, b) => a.start_time - b.start_time);
-
-                sortedTranscripts.forEach(t => {
-                    // 시간 포맷팅 (초 -> mm:ss)
-                    const formatTime = (seconds) => {
-                        const m = Math.floor(seconds / 60);
-                        const s = Math.floor(seconds % 60);
-                        return `${m}:${s.toString().padStart(2, '0')}`;
-                    };
-
-                    const item = document.createElement('div');
-                    item.className = 'transcript-item';
-                    item.dataset.startTime = t.start_time; // 시작 시간 저장
-                    item.dataset.endTime = t.end_time; // 종료 시간 저장
-                    // item.style.cursor = 'pointer'; // 클릭 기능 제거
-                    // item.onclick = () => seekAudio(t.start_time); // 클릭 기능 제거
-
-
-                    // 키워드 태그 파싱 logic ([키워드] 텍스트...)
-                    let displayText = t.text;
-                    let keywordBadge = '';
-                    const tagMatch = t.text.match(/^\[(.*?)\]\s*(.*)/);
-
-                    if (tagMatch) {
-                        const keyword = tagMatch[1];
-                        displayText = tagMatch[2];
-                        // 키워드 뱃지 생성 (색상은 랜덤 또는 고정)
-                        // var(--primary) 색상 사용
-                        keywordBadge = `<span style="
-                            display: inline-block;
-                            background-color: #e7f1ff;
-                            color: #007bff;
-                            padding: 2px 8px;
-                            border-radius: 12px;
-                            font-size: 0.8em;
-                            font-weight: bold;
-                            margin-right: 8px;
-                            vertical-align: middle;
-                        ">${keyword}</span>`;
-                    }
-
-                    item.innerHTML = `
-                        <!-- 시간은 보조 정보로 축소 -->
-                        <div class="time" style="color:#aaa; font-size: 0.8em; min-width: 40px; margin-top: 4px;">
-                            ${formatTime(t.start_time)}
-                        </div>
-                        <div class="content" style="flex: 1; line-height: 1.6;">
-                            ${keywordBadge}<span style="vertical-align: middle;">${displayText}</span>
-                        </div>
-                    `;
-                    transcriptList.appendChild(item);
+            // 이벤트 리스너 바인딩
+            if (searchInput) {
+                searchInput.addEventListener('input', (e) => {
+                    renderTranscripts(meeting.transcripts, e.target.value, sortSelect?.value || 'asc');
                 });
-            } else {
-                transcriptList.innerHTML = '<p class="placeholder-text">전사 데이터가 없습니다.</p>';
             }
+            if (sortSelect) {
+                sortSelect.addEventListener('change', (e) => {
+                    renderTranscripts(meeting.transcripts, searchInput?.value || '', e.target.value);
+                });
+            }
+        }
+
+        function renderTranscripts(transcripts, keyword = '', sortOrder = 'asc') {
+            if (!transcriptList) return;
+            transcriptList.innerHTML = '';
+
+            if (!transcripts || transcripts.length === 0) {
+                transcriptList.innerHTML = '<p class="placeholder-text">전사 데이터가 없습니다.</p>';
+                return;
+            }
+
+            // 1. 필터링 (키워드 검색)
+            let filtered = transcripts;
+            if (keyword.trim()) {
+                const lowerKeyword = keyword.toLowerCase();
+                filtered = transcripts.filter(t => t.text.toLowerCase().includes(lowerKeyword));
+            }
+
+            // 2. 정렬 (시간순/최신순)
+            // 원본 배열 보호를 위해 filter 결과는 이미 새 배열임
+            filtered.sort((a, b) => {
+                if (sortOrder === 'asc') return a.start_time - b.start_time;
+                else return b.start_time - a.start_time;
+            });
+
+            if (filtered.length === 0) {
+                transcriptList.innerHTML = '<p class="placeholder-text">검색 결과가 없습니다.</p>';
+                return;
+            }
+
+            // 3. 렌더링
+            filtered.forEach(t => {
+                const formatTime = (seconds) => {
+                    const m = Math.floor(seconds / 60);
+                    const s = Math.floor(seconds % 60);
+                    return `${m}:${s.toString().padStart(2, '0')}`;
+                };
+
+                const item = document.createElement('div');
+                item.className = 'transcript-item';
+                item.dataset.startTime = t.start_time;
+                item.dataset.endTime = t.end_time;
+
+                // [키워드] 배지 파싱 logic
+                let displayText = t.text;
+                let keywordBadge = '';
+                const tagMatch = t.text.match(/^\[(.*?)\]\s*(.*)/);
+
+                if (tagMatch) {
+                    const k_word = tagMatch[1];
+                    displayText = tagMatch[2];
+                    keywordBadge = `<span style="
+                        display: inline-block;
+                        background-color: #e7f1ff;
+                        color: #007bff;
+                        padding: 2px 8px;
+                        border-radius: 12px;
+                        font-size: 0.8em;
+                        font-weight: bold;
+                        margin-right: 8px;
+                        vertical-align: middle;
+                    ">${k_word}</span>`;
+                }
+
+                // 검색어 하이라이팅 (옵션)
+                if (keyword.trim()) {
+                    const regex = new RegExp(`(${keyword})`, 'gi');
+                    displayText = displayText.replace(regex, '<mark style="background:#fff3cd; padding:0;">$1</mark>');
+                }
+
+                item.innerHTML = `
+                    <div class="time" style="color:#aaa; font-size: 0.8em; min-width: 40px; margin-top: 4px;">
+                        ${formatTime(t.start_time)}
+                    </div>
+                    <div class="content" style="flex: 1; line-height: 1.6;">
+                        ${keywordBadge}<span style="vertical-align: middle;">${displayText}</span>
+                    </div>
+                `;
+                transcriptList.appendChild(item);
+            });
         }
 
         // 요약본 로딩 로직

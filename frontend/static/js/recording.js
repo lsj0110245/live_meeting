@@ -10,6 +10,7 @@ let mediaRecorder = null;
 let audioChunks = []; // 오디오 데이터 조각 수집용
 let isRecording = false;
 let currentMeetingId = null; // 현재 녹음 중인 회의 ID
+let fullTranscript = ""; // 전체 전사 텍스트 저장용
 
 // DOM 요소
 const statusDot = document.querySelector('.status-dot');

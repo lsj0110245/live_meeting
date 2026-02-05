@@ -94,9 +94,15 @@ async def process_audio_file(meeting_id: int, file_path: str):
         # (주의: 아래 4번 단계에서 process_meeting_summary 호출 시 DB에서 다시 읽으므로 여기선 full_text 변수만 준비하면 됨, 
         # 하지만 process_meeting_summary 내부 로직은 DB의 Transcript를 읽어서 합치므로, 여기선 DB 저장만 잘하면 됨.) 
         
-        # 3. 회의 상태 업데이트
+        # 3. 회의 상태 업데이트 및 총 재생 시간 저장
         meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
         if meeting:
+            if segments:
+                last_segment = segments[-1]
+                duration_seconds = int(last_segment.get('end', 0) + 1) # 올림 처리
+                meeting.duration = duration_seconds
+                print(f"⏱️ 회의 총 시간 업데이트: {duration_seconds}초")
+            
             meeting.status = "completed"
             
         db.commit()
