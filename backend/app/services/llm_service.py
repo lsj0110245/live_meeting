@@ -75,39 +75,69 @@ class LLMService:
             # [DEBUG] 원본 LLM 응답 로깅
             print(f"[DEBUG] Raw LLM Response (first 500 chars): {response_text[:500] if response_text else 'EMPTY'}")
             
-            # JSON 파싱
+            # JSON 파싱 및 보정
             try:
-                # 가끔 Markdown 코드 블록(```json ... ```)으로 감싸져 나오는 경우 처리
-                cleaned_text = response_text.strip()
-                if cleaned_text.startswith("```"):
+                # [전처리] Markdown Code Block 제거 (```json ... ```) 및 불필요한 공백 제거
+                clean_text = response_text.strip()
+                if "```" in clean_text:
                     import re
-                    match = re.search(r"```(?:json)?(.*?)```", cleaned_text, re.DOTALL)
-                    if match:
-                        cleaned_text = match.group(1).strip()
+                    clean_text = re.sub(r'^```[a-zA-Z]*\n', '', clean_text)
+                    clean_text = re.sub(r'\n```$', '', clean_text)
+                    clean_text = clean_text.strip()
                 
-                result_json = json.loads(cleaned_text)
-                
+                result_json = null = None # 파싱 결과 초기화
+
+                # 1차 시도: 표준 JSON 파싱
+                try:
+                    result_json = json.loads(clean_text)
+                except json.JSONDecodeError:
+                    # 2차 시도: Python AST (Single Quote 허용)
+                    try:
+                        import ast
+                        result_json = ast.literal_eval(clean_text)
+                    except:
+                        # 3차 시도: 텍스트 내에서 JSON 객체 부분만 추출 ('{' 로 시작해서 '}' 로 끝나는 구간)
+                        try:
+                            start_idx = clean_text.find('{')
+                            end_idx = clean_text.rfind('}')
+                            if start_idx != -1 and end_idx != -1:
+                                json_part = clean_text[start_idx:end_idx+1]
+                                result_json = json.loads(json_part)
+                            else:
+                                raise ValueError("No JSON object found")
+                        except:
+                            raise ValueError("All parsing attempts failed")
+
                 # [구조 보정] 만약 root에 purpose, content 등이 있다면 summary로 이동
-                if "summary" not in result_json:
-                    # 혹시 root에 바로 필드들이 있는지 확인
-                    if "content" in result_json or "purpose" in result_json:
-                        print("LLM returned flat JSON. Wrapping in 'summary'.")
-                        result_json = {
-                            "metadata": result_json.get("metadata", {}),
-                            "summary": result_json
-                        }
+                if isinstance(result_json, dict):
+                    if "summary" not in result_json:
+                        if "content" in result_json or "purpose" in result_json:
+                            print("LLM returned flat JSON. Wrapping in 'summary'.")
+                            result_json = {
+                                "metadata": result_json.get("metadata", {}),
+                                "summary": result_json
+                            }
                 
                 return result_json
                 
-            except json.JSONDecodeError as e:
+            except Exception as e:
                 print(f"JSON Parsing Error: {e}")
                 print(f"Failed Text: {response_text}")
-                # 파싱 실패 시 기본 구조 반환
+                
+                # 파싱 실패 시 기본 구조 반환 (전체 텍스트 오염 방지)
+                fallback_content = f"⚠️ 데이터 형식을 해석할 수 없습니다. 원본 텍스트:\n\n{response_text}"
+                try:
+                    # 너무 길면 잘라서 보여줌
+                    if len(response_text) > 1000:
+                         fallback_content = f"⚠️ 데이터 형식을 해석할 수 없습니다. 원본 텍스트(일부):\n\n{response_text[:1000]}..."
+                except:
+                    pass
+
                 return {
                     "metadata": {},
                     "summary": {
                         "purpose": "요약 실패 (포맷 오류)",
-                        "content": response_text, # 원본 텍스트라도 저장
+                        "content": fallback_content,
                         "conclusion": "",
                         "action_items": ""
                     }

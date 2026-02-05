@@ -80,19 +80,73 @@ async def process_meeting_summary(meeting_id: int):
             summ['content'] = f"⚠️ 요약 내용이 생성되지 않았습니다. 원본 텍스트 미리보기:\n\n{preview_text}"
             summ['purpose'] = "요약 실패 (원문 표시 중)"
 
+        # [Format Helper] JSON/Dict 형태의 문자열을 깔끔한 Markdown으로 변환
+        def format_item(item):
+            if not item: return "내용 없음"
+            
+            # 이미 문자열이고 JSON 포맷({, [)이 아니라면 그대로 반환
+            if isinstance(item, str):
+                item = item.strip()
+                
+                # Markdown Code Block 제거 (```json ... ```)
+                if item.startswith('```'):
+                    import re
+                    # 첫 줄(```json)과 마지막 줄(```) 제거
+                    item = re.sub(r'^```[a-zA-Z]*\n', '', item)
+                    item = re.sub(r'\n```$', '', item)
+                    item = item.strip()
+
+                if not (item.startswith('{') or item.startswith('[')):
+                    return item
+                
+                # JSON 문자열 파싱 시도 (ast -> json 순서)
+                try:
+                    import ast
+                    # 1. Python Dictionary Style (Single Quotes)
+                    item = ast.literal_eval(item)
+                except:
+                    try:
+                        import json
+                        # 2. Standard JSON Style (Double Quotes)
+                        item = json.loads(item)
+                    except:
+                        return item # 파싱 실패 시 원본 반환
+
+            # Dictionary 처리
+            if isinstance(item, dict):
+                lines = []
+                for k, v in item.items():
+                    # 키가 숫자인 경우(순서) 무시하거나 포맷팅
+                    clean_key = k.lstrip('- ').strip()
+                    lines.append(f"- **{clean_key}**: {v}")
+                return "\n".join(lines)
+            
+            # Set 처리 (순서가 없으므로 정렬)
+            if isinstance(item, set):
+                # set을 리스트로 변환 및 정렬
+                item = sorted(list(item), key=str)
+                # 아래 List 처리 로직으로 흐르도록 하거나 직접 반환
+                return "\n".join([f"- {str(x).strip()}" for x in item])
+
+            # List 처리
+            if isinstance(item, list):
+                return "\n".join([f"- {str(x).strip()}" for x in item])
+                
+            return str(item)
+
         markdown_content = f"""# {meeting.title} 회의록
 
 ## 📅 요약
-{summ.get('purpose', '내용 없음')}
+{format_item(summ.get('purpose', '내용 없음'))}
 
 ## 📌 주요 안건 및 내용
-{summ.get('content', '내용 없음')}
+{format_item(summ.get('content', '내용 없음'))}
 
 ## ✅ 결론 및 결정 사항
-{summ.get('conclusion', '내용 없음')}
+{format_item(summ.get('conclusion', '내용 없음'))}
 
 ## 📝 향후 계획
-{summ.get('action_items', '내용 없음')}
+{format_item(summ.get('action_items', '내용 없음'))}
 """
         
         # 이미 존재하는 요약이 있는지 확인
