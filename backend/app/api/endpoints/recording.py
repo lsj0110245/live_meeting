@@ -423,10 +423,10 @@ async def websocket_endpoint(
                     from app.models.meeting import Meeting
                     meeting = bg_db.query(Meeting).filter(Meeting.id == mid).first()
                     if meeting:
-                        meeting.status = "completed"
+                        # meeting.status = "completed" # 여기서는 완료로 찍지 않음 (요약 후 완료 처리)
                         meeting.duration = int(duration)
                         bg_db.commit()
-                        print(f"Meeting {mid} finalized.")
+                        print(f"Meeting {mid} finalized (audio/duration). Waiting for summary...")
 
                     # 전사 내용이 어느 정도 있을 때만 요약
                     if full_text and len(full_text) > 10:
@@ -447,6 +447,12 @@ async def websocket_endpoint(
                                     updated = True
                                 if updated:
                                     bg_db.commit()
+
+                            # 요약 생성 완료 후 비로소 'completed'로 상태 변경
+                            if meeting:
+                                meeting.status = "completed"
+                                bg_db.commit()
+                                print(f"Meeting {mid} status updated to COMPLETED.")
 
                             # 요약 저장
                             if "summary" in summary_json:
@@ -479,6 +485,14 @@ async def websocket_endpoint(
                                 print(f"Final structured summary saved for meeting {mid}.")
                 except Exception as e:
                     print(f"Final cleanup task failed: {e}")
+                    # 실패하더라도 일단 완료 처리는 해야 함 (무한 processing 방지)
+                    try:
+                        if meeting and meeting.status != "completed":
+                            meeting.status = "completed"
+                            bg_db.commit()
+                            print(f"Meeting {mid} forced to COMPLETED after error.")
+                    except:
+                        pass
                 finally:
                     bg_db.close()
 

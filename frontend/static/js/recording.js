@@ -11,6 +11,7 @@ let audioChunks = []; // 오디오 데이터 조각 수집용
 let isRecording = false;
 let currentMeetingId = null; // 현재 녹음 중인 회의 ID
 let fullTranscript = ""; // 전체 전사 텍스트 저장용
+let isIntentionalStop = false; // [Fix] 사용자가 직접 정지 버튼을 눌렀는지 여부
 
 // DOM 요소
 const statusDot = document.querySelector('.status-dot');
@@ -56,7 +57,14 @@ function connectWebSocket() {
     websocket.onclose = function () {
         console.log('WebSocket 연결 끊김');
         updateStatus('disconnected', '연결 끊김');
-        stopRecording();
+
+        // [Fix] 연결 끊김 시 처리
+        if (isRecording) {
+            if (!isIntentionalStop) {
+                alert("서버 연결이 끊겨 녹음이 중단되었습니다.");
+            }
+            stopRecording();
+        }
     };
 
     websocket.onerror = function (error) {
@@ -124,6 +132,7 @@ function updateStatus(status, text) {
 let meetingMetadata = null;
 
 function startRecording() {
+    isIntentionalStop = false; // [Fix] 초기화
     // 메타데이터 입력 없이 바로 녹음 시작 (기본값 사용)
     startRecordingImmediate();
 }
@@ -423,8 +432,11 @@ function stopRecording() {
     // 최종 오디오 파일 업로드 (메타데이터/Duration 복구)
     finalizeAudioUpload();
 
-    // 메타데이터 수정 확인 모달 표시
-    showEditConfirmationModal();
+    // 메타데이터 수정 확인 모달 표시 (의도적인 종료일 때만)
+    if (isIntentionalStop) {
+        showEditConfirmationModal();
+        isIntentionalStop = false; // Reset
+    }
 }
 
 /**
@@ -645,6 +657,13 @@ document.addEventListener('DOMContentLoaded', function () {
     const submitBtn = document.getElementById('metadata-submit-btn');
     if (submitBtn) {
         submitBtn.onclick = submitMetadata;
+    }
+
+    // [Fix] 의도적인 정지 감지
+    if (btnStop) {
+        btnStop.addEventListener('click', function () {
+            isIntentionalStop = true;
+        });
     }
 });
 

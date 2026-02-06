@@ -121,7 +121,9 @@ class FasterWhisperSTTService:
         
         try:
             # [최적화] 실시간 정확도 및 속도 극대화 설정
-            segments, info = self.model.transcribe(
+            # Blocking 방지를 위해 별도 스레드에서 실행
+            segments, info = await asyncio.to_thread(
+                self.model.transcribe,
                 temp_path,
                 language=language,
                 beam_size=5,
