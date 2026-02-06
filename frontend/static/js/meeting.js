@@ -30,7 +30,7 @@ async function loadMeetingDetails() {
         currentMeetingData = meeting; // 데이터 저장
 
         document.getElementById('meeting-title').innerText = meeting.title;
-        document.getElementById('meeting-date').innerText = new Date(meeting.meeting_date || meeting.created_at).toLocaleString(); // meeting_date 우선 사용
+        document.getElementById('meeting-date').innerText = new Date(meeting.meeting_date || meeting.created_at).toLocaleString('ko-KR'); // meeting_date 우선 사용
         document.getElementById('meeting-desc').innerText = meeting.description || '설명 없음';
 
         if (meeting.audio_file_path) {

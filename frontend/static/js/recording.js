@@ -160,7 +160,7 @@ function startRecordingImmediate() {
 
     // 기본 메타데이터 생성
     meetingMetadata = {
-        title: `실시간 회의 ${year}-${month}-${day} ${hours}:${minutes}`,
+        title: `실시간 회의 ${year}. ${month}. ${day}. ${hours}:${minutes}`, // 더 보기 좋은 포맷으로 변경
         meeting_type: "실시간 녹음",
         meeting_date: formattedDate,
         attendees: "",
