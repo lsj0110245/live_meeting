@@ -44,8 +44,6 @@ class FasterWhisperSTTService:
         """
         녹음 파일 전사 (정확도 우선)
         """
-        self._initialize_model()
-        
         try:
             # [최적화] 파일 전사 정확도 극대화 설정
             # Blocking 방지를 위해 전체 전사 로직을 별도 스레드에서 실행
@@ -54,6 +52,9 @@ class FasterWhisperSTTService:
             
             def _transcribe_in_thread():
                 """스레드 내부에서 실행될 전사 함수"""
+                # [수정] 모델 초기화도 스레드 내부에서 수행
+                self._initialize_model()
+
                 segments, info = self.model.transcribe(
                     file_path,
                     language=language,
@@ -111,7 +112,8 @@ class FasterWhisperSTTService:
             # print(f"Skipping tiny audio chunk: {len(audio_bytes)} bytes")
             return ""
 
-        self._initialize_model()
+        # [수정] 모델 초기화도 스레드/비동기로 처리하여 Blocking 방지
+        await asyncio.to_thread(self._initialize_model)
         
         # [공통 전처리] Denoise & Normalize 적용
         # 실시간 모드이므로 빠른 처리를 위해 quality="fast" 적용
