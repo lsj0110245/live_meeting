@@ -29,11 +29,11 @@ async def process_meeting_summary(meeting_id: int):
         SAFETY_LIMIT = 10000 
         
         if len(full_text) > SAFETY_LIMIT:
-             print(f"[Safe Mode] 텍스트가 매우 깁니다({len(full_text)}자). 안전을 위해 Map-Reduce 전략 적용")
-             summary_data = await _generate_summary_with_chunking(meeting.title, full_text)
+            print(f"[Safe Mode] 텍스트가 매우 깁니다({len(full_text)}자). 안전을 위해 Map-Reduce 전략 적용", flush=True)
+            summary_data = await _generate_summary_with_chunking(meeting.title, full_text)
         else:
-             # 긴 컨텍스트 모델 사용으로 청킹 없이 전체 처리 (정확도 최상)
-             summary_data = await llm_service.generate_summary(meeting.title, full_text)
+            # 긴 컨텍스트 모델 사용으로 청킹 없이 전체 처리 (정확도 최상)
+            summary_data = await llm_service.generate_summary(meeting.title, full_text)
         
         if not summary_data:
             print(f"LLM 응답 없음. 회의 ID: {meeting_id}")
