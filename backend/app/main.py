@@ -27,14 +27,17 @@ BACKEND_ROOT = BASE_DIR.parent  # backend 디렉토리 (Docker에서는 /app)
 # 1. Docker 환경 (/app/frontend) 우선 확인
 frontend_dir = Path("/app/frontend")
 
-# 2. Docker 경로에 없으면 로컬 개발 환경 경로 확인 (../../frontend)
+# 2. Docker 경로에 없으면 로컬 개발 환경 경로 확인
 if not (frontend_dir / "static").exists():
-    # backend/app -> backend -> live_meeting -> frontend
-    # BACKEND_ROOT가 backend일 경우 그 상위가 live_meeting
+    # 현재 backend 디렉토리의 부모(프로젝트 루트)에서 frontend 찾기
     project_root = BACKEND_ROOT.parent
-    possible_local_frontend = project_root / "frontend"
-    if (possible_local_frontend / "static").exists():
-        frontend_dir = possible_local_frontend
+    local_frontend = project_root / "frontend"
+    
+    if (local_frontend / "static").exists():
+        frontend_dir = local_frontend
+    else:
+        # Fallback: backend 내부에 frontend가 있는 구조인 경우 (혹시 모를 경우대비)
+        frontend_dir = BACKEND_ROOT / "frontend"
 
 static_dir = frontend_dir / "static"
 templates_dir = frontend_dir / "templates"

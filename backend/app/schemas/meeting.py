@@ -10,7 +10,6 @@ class MeetingBase(BaseModel):
     meeting_type: Optional[str] = None
     meeting_date: Optional[datetime] = None
     attendees: Optional[str] = None
-    attendees: Optional[str] = None
     writer: Optional[str] = None
     duration: Optional[int] = 0
 
@@ -25,7 +24,6 @@ class MeetingUpdate(MeetingBase):
     meeting_type: Optional[str] = None
     meeting_date: Optional[datetime] = None
     attendees: Optional[str] = None
-    writer: Optional[str] = None
     writer: Optional[str] = None
     status: Optional[str] = None
     duration: Optional[int] = None

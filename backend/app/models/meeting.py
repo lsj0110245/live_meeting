@@ -1,7 +1,8 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Enum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
+from app.models.enums import MeetingStatus
 
 class Meeting(Base):
     """
@@ -18,7 +19,7 @@ class Meeting(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     audio_file_path = Column(String, nullable=True) # 오디오 파일 경로 추가
     file_hash = Column(String(64), nullable=True, index=True) # SHA-256 해시 (중복 방지용)
-    status = Column(String, default="pending") # 회의 상태 (pending, processing, completed)
+    status = Column(Enum(MeetingStatus), default=MeetingStatus.PENDING) # 회의 상태 (pending, processing, completed)
     folder_id = Column(Integer, ForeignKey("folders.id"), nullable=True) # 폴더 ID 추가
     duration = Column(Integer, default=0) # 녹음 시간 (초)
     

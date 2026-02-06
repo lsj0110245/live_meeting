@@ -22,6 +22,7 @@ router = APIRouter()
 from app.db.session import SessionLocal
 
 from app.services.meeting_tasks import process_meeting_summary
+from app.models.enums import MeetingStatus
 
 
 async def process_audio_file(meeting_id: int, file_path: str):
@@ -98,7 +99,7 @@ async def process_audio_file(meeting_id: int, file_path: str):
                 meeting.duration = duration_seconds
                 print(f"⏱️ 회의 총 시간 업데이트: {duration_seconds}초")
             
-            meeting.status = "completed"
+            meeting.status = MeetingStatus.COMPLETED
             
         db.commit()
         print(f"💾 [BG TASK] Meeting {meeting_id} transcription completed.")
@@ -119,7 +120,7 @@ async def process_audio_file(meeting_id: int, file_path: str):
         try:
             meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
             if meeting:
-                meeting.status = "error"
+                meeting.status = MeetingStatus.FAILED
                 db.commit()
         except:
             pass
@@ -217,7 +218,7 @@ async def upload_file(
             meeting_date=parsed_date,
             attendees=attendees,
             writer=writer,
-            status="processing"  # 처리 중 상태로 시작
+            status=MeetingStatus.PROCESSING  # 처리 중 상태로 시작
         )
         db.add(meeting)
         db.commit()
@@ -267,7 +268,7 @@ async def finalize_recording(
         
         # DB 업데이트 및 상태를 'processing'으로 변경 (재분석 중임을 표시)
         meeting.audio_file_path = f"media/{filename}"
-        meeting.status = "processing"
+        meeting.status = MeetingStatus.PROCESSING
         db.commit()
 
         # [고도화 하이브리드] Whisper 엔진을 이용한 전체 오디오 정밀 재분석 시작

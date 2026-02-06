@@ -13,6 +13,7 @@ from typing import Any, List
 import asyncio
 import os
 from pathlib import Path
+from app.models.enums import MeetingStatus
 
 router = APIRouter()
 
@@ -103,7 +104,7 @@ def generate_summary(
         raise HTTPException(status_code=400, detail="권한이 없습니다.")
         
     # Background Task로 LLM 서비스 호출 (Llama 3)
-    meeting.status = "processing"
+    meeting.status = MeetingStatus.PROCESSING
     db.commit()
     
     # Background Task 실행
@@ -143,7 +144,7 @@ def retry_analysis(
         raise HTTPException(status_code=400, detail=f"오디오 파일을 찾을 수 없습니다: {file_path}")
     
     # 상태를 processing으로 변경
-    meeting.status = "processing"
+    meeting.status = MeetingStatus.PROCESSING
     db.commit()
     
     # 백그라운드 작업 재시작 (upload.py의 process_audio_file 재사용)

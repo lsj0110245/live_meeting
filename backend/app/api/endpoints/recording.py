@@ -15,6 +15,7 @@ from app.services.llm_service import llm_service
 from app.models.transcript import Transcript
 from app.models.meeting import Meeting
 from app.models.summary import Summary
+from app.models.enums import MeetingStatus
 import time
 import asyncio
 
@@ -67,7 +68,7 @@ def _save_summary_and_metadata_sync(mid: int, summary_json: dict):
             updated = True
         
         # 2. 상태 완료 처리
-        meeting.status = "completed"
+        meeting.status = MeetingStatus.COMPLETED
         updated = True
         
         if updated:
@@ -112,8 +113,8 @@ def _force_complete_meeting_sync(mid: int):
     db = SessionLocal()
     try:
         meeting = db.query(Meeting).filter(Meeting.id == mid).first()
-        if meeting and meeting.status != "completed":
-            meeting.status = "completed"
+        if meeting and meeting.status != MeetingStatus.COMPLETED:
+            meeting.status = MeetingStatus.COMPLETED
             db.commit()
             print(f"Meeting {mid} forced to COMPLETED after error.")
     except Exception as e:
@@ -312,7 +313,7 @@ async def websocket_endpoint(
                                 attendees=metadata.get("attendees"),
                                 writer=metadata.get("writer"),
                                 owner_id=user.id,
-                                status="recording"
+                                status=MeetingStatus.RECORDING
                             )
                             db.add(meeting)
                             db.commit()
