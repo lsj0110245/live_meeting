@@ -507,7 +507,7 @@ function getStatusDisplay(status) {
         case 'recording':
             return { text: '녹음 중', class: 'status-recording', icon: 'fa-microphone' };
         case 'processing':
-            return { text: 'AI 분석 중 (약 1~3분 소요)', class: 'status-processing', icon: 'fa-spinner fa-spin' };
+            return { text: 'AI 분석 중 (파일 크기에 따라 소요시간이 다릅니다.)', class: 'status-processing', icon: 'fa-spinner fa-spin' };
         case 'completed':
             return { text: '분석 완료', class: 'status-completed', icon: 'fa-check' };
         case 'error':
