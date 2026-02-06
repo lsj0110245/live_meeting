@@ -171,7 +171,7 @@ async def process_meeting_summary(meeting_id: int):
         # 단순히 여기에서 completed로 바꾸면, upload.py의 흐름과 겹칠 수 있으나
         # upload.py는 이미 completed 상태에서 이 함수를 호출함.
         # 따라서 수동 호출(processing 상태)인 경우에만 유효함.
-        if meeting.status == "processing":
+        if meeting.status in ["processing", "recording"]:
             meeting.status = "completed"
             db.commit()
         

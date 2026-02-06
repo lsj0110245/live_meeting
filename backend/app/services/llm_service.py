@@ -3,6 +3,8 @@ from langchain_community.chat_models import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from app.core.config import settings
+import re
+import asyncio  # [FIX] asyncio import 추가
 
 class LLMService:
     def __init__(self):
@@ -66,11 +68,15 @@ class LLMService:
                 
             print("LLM 회의록 생성 시작...")
             
-            # LangChain 비동기 호출
-            response_text = await self.chain.ainvoke({
-                "title": title,
-                "transcript_text": transcript_text
-            })
+            # LangChain 비동기 호출 (실제로는 내부에 Blocking I/O가 있으므로 스레드 풀에서 실행)
+            # asyncio.to_thread로 감싸서 이벤트 루프 차단 방지
+            import asyncio
+            response_text = await asyncio.to_thread(
+                lambda: self.chain.invoke({
+                    "title": title,
+                    "transcript_text": transcript_text
+                })
+            )
             
             # [DEBUG] 원본 LLM 응답 로깅
             print(f"[DEBUG] Raw LLM Response (first 500 chars): {response_text[:500] if response_text else 'EMPTY'}")
@@ -166,7 +172,9 @@ class LLMService:
             [회의 내용]
             {text}
             """
-            response = await self.llm.ainvoke(prompt)
+            response = await asyncio.to_thread(
+                lambda: self.llm.invoke(prompt)
+            )
             # EXAONE은 지시를 잘 따르므로 바로 텍스트 반환
             return response.content.strip()
                 
@@ -200,7 +208,9 @@ class LLMService:
             # 현재 self.llm 인스턴스는 JSON 출력을 선호할 수 있으므로, 
             # 단순히 invoke 호출하되, 프롬프트에서 결과만 출력하도록 강력히 지시
             
-            response = await self.llm.ainvoke(prompt)
+            response = await asyncio.to_thread(
+                lambda: self.llm.invoke(prompt)
+            )
             corrected_text = response.content.strip()
             
             # 혹시라도 JSON이나 마크다운으로 감싸져 있으면 제거

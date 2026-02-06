@@ -12,8 +12,114 @@ from app.api import deps
 from app.models.user import User
 from app.services.stt_service import stt_service
 from app.services.llm_service import llm_service
+from app.models.transcript import Transcript
+from app.models.meeting import Meeting
+from app.models.summary import Summary
 import time
 import asyncio
+
+# [Optimization] DB 작업을 위한 동기 헬퍼 함수들 (스레드 풀에서 실행)
+def _update_transcript_db_sync(tid: int, corrected_text: str):
+    """자막 교정 내용을 DB에 업데이트 (동기)"""
+    db = SessionLocal()
+    try:
+        t_item = db.query(Transcript).filter(Transcript.id == tid).first()
+        if t_item:
+            t_item.text = corrected_text
+            db.commit()
+    except Exception as e:
+        print(f"DB Update Error (Transcript): {e}")
+    finally:
+        db.close()
+
+def _update_meeting_duration_sync(mid: int, duration: int):
+    """회의 시간 업데이트 (동기)"""
+    db = SessionLocal()
+    try:
+        meeting = db.query(Meeting).filter(Meeting.id == mid).first()
+        if meeting:
+            meeting.duration = duration
+            db.commit()
+    except Exception as e:
+        print(f"DB Update Error (Duration): {e}")
+    finally:
+        db.close()
+
+def _save_summary_and_metadata_sync(mid: int, summary_json: dict):
+    """요약 및 메타데이터 저장 및 완료 처리 (동기)"""
+    db = SessionLocal()
+    try:
+        meeting = db.query(Meeting).filter(Meeting.id == mid).first()
+        if not meeting:
+            return
+
+        # 1. 메타데이터 업데이트
+        metadata = summary_json.get("metadata", {})
+        updated = False
+        if meeting.title.startswith("실시간 회의") and metadata.get("title_suggestion"):
+            meeting.title = metadata["title_suggestion"]
+            updated = True
+        if not meeting.meeting_type and metadata.get("meeting_type"):
+            meeting.meeting_type = metadata["meeting_type"]
+            updated = True
+        if not meeting.attendees and metadata.get("attendees"):
+            meeting.attendees = metadata["attendees"]
+            updated = True
+        
+        # 2. 상태 완료 처리
+        meeting.status = "completed"
+        updated = True
+        
+        if updated:
+            db.commit()
+            print(f"Meeting {mid} status updated to COMPLETED.")
+
+        # 3. 요약 저장
+        if "summary" in summary_json:
+            s_data = summary_json["summary"]
+            
+            # 필드들을 하나의 마크다운 문서로 합침
+            formatted_parts = []
+            final_title = metadata.get("title_suggestion", meeting.title)
+            formatted_parts.append(f"# {final_title} 회의록\n")
+            
+            if s_data.get("purpose"):
+                formatted_parts.append(f"{s_data['purpose']}")
+            if s_data.get("content"):
+                formatted_parts.append(f"\n{s_data['content']}")
+            if s_data.get("conclusion"):
+                formatted_parts.append(f"\n{s_data['conclusion']}")
+            if s_data.get("action_items"):
+                formatted_parts.append(f"\n{s_data['action_items']}")
+            
+            summary_content = "\n".join(formatted_parts)
+            
+            existing = db.query(Summary).filter(Summary.meeting_id == mid).first()
+            if existing:
+                existing.content = summary_content
+            else:
+                db.add(Summary(meeting_id=mid, content=summary_content))
+            db.commit()
+            print(f"Final structured summary saved for meeting {mid}.")
+            
+    except Exception as e:
+        print(f"DB Update Error (Summary): {e}")
+    finally:
+        db.close()
+
+def _force_complete_meeting_sync(mid: int):
+    """에러 발생 시 강제로 완료 처리 (동기)"""
+    db = SessionLocal()
+    try:
+        meeting = db.query(Meeting).filter(Meeting.id == mid).first()
+        if meeting and meeting.status != "completed":
+            meeting.status = "completed"
+            db.commit()
+            print(f"Meeting {mid} forced to COMPLETED after error.")
+    except Exception as e:
+        print(f"DB Force Complete Error: {e}")
+    finally:
+        db.close()
 
 router = APIRouter()
 
@@ -82,29 +188,44 @@ class ConnectionManager:
     """WebSocket 연결 관리자"""
     def __init__(self):
         self.active_sessions: Dict[str, RealtimeSession] = {}
+        self.disconnected_clients: set = set()  # 연결이 끊긴 클라이언트 추적
 
     async def connect(self, client_id: str, websocket: WebSocket, user: User):
         await websocket.accept()
         self.active_sessions[client_id] = RealtimeSession(websocket, user)
+        # 재연결 시 disconnected에서 제거
+        if client_id in self.disconnected_clients:
+            self.disconnected_clients.remove(client_id)
 
     def disconnect(self, client_id: str):
         if client_id in self.active_sessions:
             del self.active_sessions[client_id]
+        self.disconnected_clients.add(client_id)
 
     def get_session(self, client_id: str) -> RealtimeSession:
         return self.active_sessions.get(client_id)
+    
+    def is_connected(self, client_id: str) -> bool:
+        """클라이언트 연결 상태 확인"""
+        return client_id in self.active_sessions and client_id not in self.disconnected_clients
 
-    async def send_json(self, client_id: str, data: dict):
+    async def send_json(self, client_id: str, data: dict) -> bool:
+        """JSON 전송 시도, 성공 여부 반환"""
         session = self.active_sessions.get(client_id)
         if session:
             try:
                 await session.websocket.send_json(data)
+                return True
             except RuntimeError as e:
                 # 이미 연결이 끊긴 경우
                 print(f"[WebSocket] Send failed (RuntimeError): {e}")
+                self.disconnected_clients.add(client_id)
+                return False
             except Exception as e:
                 print(f"[WebSocket] Send failed: {e}")
-                # 연결이 끊긴 것으로 간주하고 처리할 수도 있음
+                self.disconnected_clients.add(client_id)
+                return False
+        return False
 
 
 
@@ -278,32 +399,28 @@ async def websocket_endpoint(
                                         current_transcript_id = transcript_record.id
                                         session.segment_index += 1
                                         
+                                        print(f"[STT] Transcript {current_transcript_id} saved to DB: {transcript[:50]}...")
+                                        
                                         # [하이브리드 전략 2단계] 비동기 LLM 교정 태스크 실행
                                         async def background_correction_task(tid: int, original_text: str, cid: str):
                                             try:
-                                                # LLM 문맥 교정
+                                                # LLM 문맥 교정 (비동기, 스레드 내부 실행됨)
                                                 corrected = await llm_service.correct_transcript(original_text)
                                                 
                                                 if corrected and corrected != original_text:
-                                                    # DB 업데이트
-                                                    # 주의: 메인 루프의 db 세션과 충돌 방지를 위해 별도 세션 사용 권장
-                                                    # 여기서는 간단히 메인 세션과 분리된 로직이 필요하므로 SessionLocal 사용
-                                                    correction_db = SessionLocal()
-                                                    try:
-                                                        t_item = correction_db.query(Transcript).filter(Transcript.id == tid).first()
-                                                        if t_item:
-                                                            t_item.text = corrected
-                                                            correction_db.commit()
-                                                            print(f"Transcript {tid} corrected: {original_text} -> {corrected}")
-                                                            
-                                                            # 클라이언트에 업데이트 전송
-                                                            await manager.send_json(cid, {
-                                                                "type": "transcript_update",
-                                                                "transcript_id": tid,
-                                                                "text": corrected
-                                                            })
-                                                    finally:
-                                                        correction_db.close()
+                                                    # DB 업데이트 (Blocking 방지를 위해 별도 스레드 실행)
+                                                    await asyncio.to_thread(_update_transcript_db_sync, tid, corrected)
+                                                    print(f"Transcript {tid} corrected and saved to DB")
+                                                    
+                                                    # 클라이언트에 업데이트 전송 (연결 상태 확인)
+                                                    if manager.is_connected(cid):
+                                                        await manager.send_json(cid, {
+                                                            "type": "transcript_update",
+                                                            "transcript_id": tid,
+                                                            "text": corrected
+                                                        })
+                                                    else:
+                                                        print(f"[LLM] Client {cid} disconnected, skipping WebSocket send")
                                             except Exception as e:
                                                 print(f"Background correction failed: {e}")
 
@@ -311,16 +428,21 @@ async def websocket_endpoint(
                                         asyncio.create_task(background_correction_task(current_transcript_id, transcript, client_id))
                                     
                                     # 클라이언트에 1차 전사 결과 전송 (ID 포함)
-                                    await manager.send_json(client_id, {
+                                    # 연결이 끊어져도 DB 저장은 이미 완료되었으므로 전송 실패는 무시
+                                    send_success = await manager.send_json(client_id, {
                                         "type": "transcript",
                                         "transcript_id": current_transcript_id,
                                         "text": transcript,
                                         "is_final": True
                                     })
                                     
+                                    if not send_success:
+                                        print(f"[STT] Client {client_id} disconnected, transcript saved to DB but not sent")
+                                    
                             except Exception as e:
                                 db.rollback()
                                 print(f"실시간 전사 오류: {str(e)}")
+                                # 에러 전송 시도 (실패해도 무시)
                                 await manager.send_json(client_id, {
                                     "type": "error",
                                     "message": str(e)
@@ -415,93 +537,23 @@ async def websocket_endpoint(
                     print(f"Failed to transcribe final chunk: {e}")
 
             # 2. 백그라운드 태스크로 전사 완료 처리 및 요약 실행
-            async def final_cleanup_and_summary(mid, full_text, duration):
+            async def final_cleanup_and_summary(mid, duration):
                 print(f"[Background Task] Starting final summary for meeting {mid}...")
-                bg_db = SessionLocal()
                 try:
-                    # 상태 업데이트
-                    from app.models.meeting import Meeting
-                    meeting = bg_db.query(Meeting).filter(Meeting.id == mid).first()
-                    if meeting:
-                        # meeting.status = "completed" # 여기서는 완료로 찍지 않음 (요약 후 완료 처리)
-                        meeting.duration = int(duration)
-                        bg_db.commit()
-                        print(f"Meeting {mid} finalized (audio/duration). Waiting for summary...")
+                    # 1. 회의 시간 업데이트 (DB Blocking 방지)
+                    await asyncio.to_thread(_update_meeting_duration_sync, mid, int(duration))
+                    print(f"Meeting {mid} finalized (audio/duration). Waiting for summary...")
 
-                    # 전사 내용이 어느 정도 있을 때만 요약
-                    if full_text and len(full_text) > 10:
-                        summary_json = await llm_service.generate_summary(meeting.title if meeting else "회의", full_text)
-                        if summary_json:
-                            # 메타데이터 업데이트
-                            metadata = summary_json.get("metadata", {})
-                            if meeting:
-                                updated = False
-                                if meeting.title.startswith("실시간 회의") and metadata.get("title_suggestion"):
-                                    meeting.title = metadata["title_suggestion"]
-                                    updated = True
-                                if not meeting.meeting_type and metadata.get("meeting_type"):
-                                    meeting.meeting_type = metadata["meeting_type"]
-                                    updated = True
-                                if not meeting.attendees and metadata.get("attendees"):
-                                    meeting.attendees = metadata["attendees"]
-                                    updated = True
-                                if updated:
-                                    bg_db.commit()
+                    # 2. 통합 요약 및 회의록 생성 (meeting_tasks 모듈 사용)
+                    from app.services.meeting_tasks import process_meeting_summary
+                    await process_meeting_summary(mid)
 
-                            # 요약 생성 완료 후 비로소 'completed'로 상태 변경
-                            if meeting:
-                                meeting.status = "completed"
-                                bg_db.commit()
-                                print(f"Meeting {mid} status updated to COMPLETED.")
-
-                            # 요약 저장
-                            if "summary" in summary_json:
-                                from app.models.summary import Summary
-                                s_data = summary_json["summary"]
-                                
-                                # 필드들을 하나의 마크다운 문서로 합침
-                                formatted_parts = []
-                                # 제목 추가 (메타데이터 활용)
-                                final_title = metadata.get("title_suggestion", meeting.title if meeting else "회의")
-                                formatted_parts.append(f"# {final_title} 회의록\n")
-                                
-                                if s_data.get("purpose"):
-                                    formatted_parts.append(f"{s_data['purpose']}")
-                                if s_data.get("content"):
-                                    formatted_parts.append(f"\n{s_data['content']}")
-                                if s_data.get("conclusion"):
-                                    formatted_parts.append(f"\n{s_data['conclusion']}")
-                                if s_data.get("action_items"):
-                                    formatted_parts.append(f"\n{s_data['action_items']}")
-                                
-                                summary_content = "\n".join(formatted_parts)
-                                
-                                existing = bg_db.query(Summary).filter(Summary.meeting_id == mid).first()
-                                if existing:
-                                    existing.content = summary_content
-                                else:
-                                    bg_db.add(Summary(meeting_id=mid, content=summary_content))
-                                bg_db.commit()
-                                print(f"Final structured summary saved for meeting {mid}.")
                 except Exception as e:
                     print(f"Final cleanup task failed: {e}")
-                    # 실패하더라도 일단 완료 처리는 해야 함 (무한 processing 방지)
-                    try:
-                        if meeting and meeting.status != "completed":
-                            meeting.status = "completed"
-                            bg_db.commit()
-                            print(f"Meeting {mid} forced to COMPLETED after error.")
-                    except:
-                        pass
-                finally:
-                    bg_db.close()
-
-            # 비동기 태스크 시작
-            asyncio.create_task(final_cleanup_and_summary(
-                session.meeting_id, 
-                session.get_full_transcript(), 
-                session.total_duration
-            ))
+                    import traceback
+                    traceback.print_exc()
+                    # 실패 시 강제 완료 처리
+                    await asyncio.to_thread(_force_complete_meeting_sync, mid)
 
         if session:
             manager.disconnect(client_id)

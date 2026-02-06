@@ -229,14 +229,13 @@ function submitMetadata() {
         return;
     }
 
-    // 메타데이터 수집
     meetingMetadata = {
         title: document.getElementById('meeting-title-input').value.trim(),
         meeting_type: document.getElementById('meeting-type-input').value.trim(),
         meeting_date: document.getElementById('meeting-date-input').value,
         attendees: document.getElementById('meeting-attendees-input').value.trim(),
         writer: document.getElementById('meeting-writer-input').value.trim(),
-        status: 'completed', // 녹음 완료 상태로 명시
+        status: 'processing', // 분석 진행 중 상태로 설정 (요약 완료 후 백엔드에서 'completed'로 변경)
         duration: recordingSeconds // 녹음 시간 전송
     };
 

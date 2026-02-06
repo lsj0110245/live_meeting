@@ -44,47 +44,56 @@ class FasterWhisperSTTService:
         """
         녹음 파일 전사 (정확도 우선)
         """
-        print(f"[파일 전사 시작] {file_path}")
         self._initialize_model()
         
         try:
             # [최적화] 파일 전사 정확도 극대화 설정
-            segments, info = self.model.transcribe(
-                file_path,
-                language=language,
-                beam_size=10,         # 오프라인 처리는 더 깊게 탐색 (5 -> 10)
-                best_of=10,           # 최상의 결과 선별
-                temperature=0,        # 일관성 최우선
-                repetition_penalty=1.2, # 중복 방지
-                condition_on_previous_text=True, # [중요] 오프라인 전사는 이전 문맥을 참조하여 전체 일관성 향상
-                initial_prompt="비즈니스 회의 전문 녹음입니다. IT 전문 용어와 고유 명사는 영문 표기를 유지하고, 문맥에 맞는 자연스러운 한국어로 전사하세요.",
-                vad_filter=True,
-                vad_parameters=dict(
-                    min_silence_duration_ms=1000, 
-                    speech_pad_ms=400
+            # Blocking 방지를 위해 전체 전사 로직을 별도 스레드에서 실행
+            # 중요: segments는 제너레이터이므로 순회(iteration)도 스레드 안에서 해야 함
+            import asyncio
+            
+            def _transcribe_in_thread():
+                """스레드 내부에서 실행될 전사 함수"""
+                segments, info = self.model.transcribe(
+                    file_path,
+                    language=language,
+                    beam_size=10,
+                    best_of=10,
+                    temperature=0,
+                    repetition_penalty=1.2,
+                    condition_on_previous_text=True,
+                    initial_prompt="비즈니스 회의 전문 녹음입니다. IT 전문 용어와 고유 명사는 영문 표기를 유지하고, 문맥에 맞는 자연스러운 한국어로 전사하세요.",
+                    vad_filter=True,
+                    vad_parameters=dict(
+                        min_silence_duration_ms=1000, 
+                        speech_pad_ms=400
+                    )
                 )
-            )
+                
+                # 제너레이터를 리스트로 변환 (이 작업도 스레드 안에서 수행)
+                result_segments = []
+                total_duration = info.duration
+                
+                for segment in segments:
+                    result_segments.append({
+                        "start": segment.start,
+                        "end": segment.end,
+                        "text": segment.text.strip()
+                    })
+                    print(f"  - [{segment.start:.2f}s ~ {segment.end:.2f}s] {segment.text.strip()[:20]}...")
+                
+                return result_segments, total_duration
             
-            # 총 지속 시간 (진행률 계산용)
-            total_duration = info.duration
+            # 스레드에서 실행
+            result_segments, total_duration = await asyncio.to_thread(_transcribe_in_thread)
+            
             print(f"오디오 길이: {total_duration:.2f}초")
-            
-            # 전사 결과 반환 (세그먼트 리스트)
-            result_segments = []
-            for segment in segments:
-                result_segments.append({
-                    "start": segment.start,
-                    "end": segment.end,
-                    "text": segment.text.strip()
-                })
-                # 진행률 업데이트
-                if total_duration > 0 and progress_callback:
-                    percent = int((segment.end / total_duration) * 100)
-                    progress_callback(percent)
-                    
-                print(f"  - [{segment.start:.2f}s ~ {segment.end:.2f}s] {segment.text.strip()[:20]}...")
-            
             print(f"[파일 전사 완료] 세그먼트 개수: {len(result_segments)}")
+            
+            # 진행률 콜백 처리 (이미 완료된 상태이므로 100%로 설정)
+            if progress_callback:
+                progress_callback(100)
+            
             return result_segments
             
         except Exception as e:
@@ -108,18 +117,21 @@ class FasterWhisperSTTService:
         # 실시간 모드이므로 빠른 처리를 위해 quality="fast" 적용
         # Blocking 방지를 위해 별도 스레드에서 실행
         import asyncio
+        import tempfile
         temp_path = None
-        try:
-             temp_path = await asyncio.to_thread(self._preprocess_audio, audio_bytes, quality="fast")
-        except Exception as e:
-             # 전처리 실패 시 로그 남기고, 원본을 임시 파일로 저장하여 계속 진행 시도
-             print(f"!! Preprocessing Critical Error: {e}")
-             import tempfile
-             with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
-                 f.write(audio_bytes)
-                 temp_path = f.name
         
         try:
+            # [품질 개선] 전처리 활성화 (비동기로 안전하게 실행)
+            # Denoise & Normalize를 통해 STT 정확도 향상
+            # Blocking 방지를 위해 별도 스레드에서 실행
+            print(f"[STT] Starting preprocessing for {len(audio_bytes)} bytes")
+            temp_path = await asyncio.to_thread(
+                self._preprocess_audio,
+                audio_bytes,
+                quality="fast"  # 실시간 모드는 fast 사용
+            )
+            print(f"[STT] Preprocessing completed: {temp_path}")
+
             # [최적화] 실시간 정확도 및 속도 극대화 설정
             # Blocking 방지를 위해 별도 스레드에서 실행
             segments, info = await asyncio.to_thread(
@@ -129,7 +141,7 @@ class FasterWhisperSTTService:
                 beam_size=5,
                 best_of=5,
                 temperature=0,
-                repetition_penalty=1.2,
+                repetition_penalty=1.3,  # 반복 억제 강화
                 no_repeat_ngram_size=3,
                 condition_on_previous_text=False,
                 initial_prompt="회의 녹음입니다. IT 기술 용어(LLM, GPT, API, Docker, FastAPI, SQL, JSON)는 정확히 영문으로 표기하고 자연스러운 한국어로 작성하세요.",
@@ -138,7 +150,7 @@ class FasterWhisperSTTService:
                     min_silence_duration_ms=500,
                     speech_pad_ms=500,          
                     min_speech_duration_ms=100, 
-                    threshold=0.3               
+                    threshold=0.4  # 임계값 상향 (더 엄격한 음성 감지)
                 )
             )
 
