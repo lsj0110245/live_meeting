@@ -12,12 +12,14 @@ let isRecording = false;
 let currentMeetingId = null; // 현재 녹음 중인 회의 ID
 let fullTranscript = ""; // 전체 전사 텍스트 저장용
 let isIntentionalStop = false; // [Fix] 사용자가 직접 정지 버튼을 눌렀는지 여부
+let isPaused = false; // [New] 일시정지 상태
 
 // DOM 요소
 const statusDot = document.querySelector('.status-dot');
 const statusText = document.querySelector('.status-text');
 const btnStart = document.getElementById('btn-start');
 const btnStop = document.getElementById('btn-stop');
+const btnPause = document.getElementById('btn-pause'); // [New]
 const timerDisplay = document.getElementById('timer-display');
 const recordingTimerEl = document.getElementById('recording-timer');
 const bufferStatus = document.getElementById('buffer-status');
@@ -368,6 +370,14 @@ async function startRecordingWithMetadata() {
         // UI 업데이트
         btnStart.disabled = true;
         btnStop.disabled = false;
+
+        // [New] 일시정지 버튼 활성화
+        btnPause.style.display = 'inline-block';
+        btnPause.disabled = false;
+        btnPause.innerHTML = '<i class="fa-solid fa-pause"></i> 일시정지';
+        btnPause.className = 'btn btn-pause';
+        isPaused = false;
+
         recordingTimerEl.style.display = 'flex';
         bufferStatus.style.display = 'block';
         transcriptContent.innerHTML = '';
@@ -391,6 +401,42 @@ async function startRecordingWithMetadata() {
 }
 
 /**
+ * [New] 일시정지 / 재개 토글
+ */
+function togglePause() {
+    if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+
+    if (!isPaused) {
+        // 일시정지 (PAUSE)
+        mediaRecorder.pause();
+        isPaused = true;
+
+        // UI 변경: 일시정지 -> 재개 버튼으로
+        btnPause.innerHTML = '<i class="fa-solid fa-play"></i> 재개';
+        btnPause.className = 'btn btn-resume';
+        updateStatus('paused', '일시정지됨');
+
+        // 타이머 정지
+        if (recordingTimer) {
+            clearInterval(recordingTimer);
+            recordingTimer = null;
+        }
+    } else {
+        // 재개 (RESUME)
+        mediaRecorder.resume();
+        isPaused = false;
+
+        // UI 변경: 재개 -> 일시정지 버튼으로
+        btnPause.innerHTML = '<i class="fa-solid fa-pause"></i> 일시정지';
+        btnPause.className = 'btn btn-pause';
+        updateStatus('recording', '녹음 중...');
+
+        // 타이머 재개
+        recordingTimer = setInterval(updateTimer, 1000);
+    }
+}
+
+/**
  * 녹음 중지
  */
 function stopRecording() {
@@ -408,6 +454,11 @@ function stopRecording() {
     // UI 업데이트
     btnStart.disabled = false;
     btnStop.disabled = true;
+
+    // [New] 일시정지 버튼 숨김
+    btnPause.style.display = 'none';
+    btnPause.disabled = true;
+
     recordingTimerEl.style.display = 'none';
     bufferStatus.style.display = 'none';
     updateStatus('connected', '녹음 완료');

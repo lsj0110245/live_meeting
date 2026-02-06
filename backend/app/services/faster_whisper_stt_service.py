@@ -112,49 +112,46 @@ class FasterWhisperSTTService:
             # print(f"Skipping tiny audio chunk: {len(audio_bytes)} bytes")
             return ""
 
-        # [수정] 모델 초기화도 스레드/비동기로 처리하여 Blocking 방지
-        await asyncio.to_thread(self._initialize_model)
-        
-        # [공통 전처리] Denoise & Normalize 적용
-        # 실시간 모드이므로 빠른 처리를 위해 quality="fast" 적용
-        # Blocking 방지를 위해 별도 스레드에서 실행
+        # [공통 전처리] Denoise & Normalize 적용 (CPU 작업 - 별도 스레드 무방)
         import asyncio
         import tempfile
+        import os
         temp_path = None
         
         try:
-            # [품질 개선] 전처리 활성화 (비동기로 안전하게 실행)
-            # Denoise & Normalize를 통해 STT 정확도 향상
-            # Blocking 방지를 위해 별도 스레드에서 실행
+            # [품질 개선] 전처리
             print(f"[STT] Starting preprocessing for {len(audio_bytes)} bytes")
             temp_path = await asyncio.to_thread(
                 self._preprocess_audio,
                 audio_bytes,
-                quality="fast"  # 실시간 모드는 fast 사용
+                quality="fast"
             )
             print(f"[STT] Preprocessing completed: {temp_path}")
 
-            # [최적화] 실시간 정확도 및 속도 극대화 설정
-            # Blocking 방지를 위해 별도 스레드에서 실행
-            segments, info = await asyncio.to_thread(
-                self.model.transcribe,
-                temp_path,
-                language=language,
-                beam_size=5,
-                best_of=5,
-                temperature=0,
-                repetition_penalty=1.3,  # 반복 억제 강화
-                no_repeat_ngram_size=3,
-                condition_on_previous_text=False,
-                initial_prompt="회의 녹음입니다. IT 기술 용어(LLM, GPT, API, Docker, FastAPI, SQL, JSON)는 정확히 영문으로 표기하고 자연스러운 한국어로 작성하세요.",
-                vad_filter=True,
-                vad_parameters=dict(
-                    min_silence_duration_ms=500,
-                    speech_pad_ms=500,          
-                    min_speech_duration_ms=100, 
-                    threshold=0.4  # 임계값 상향 (더 엄격한 음성 감지)
+            # [수정] 모델 초기화와 전사를 동일 스레드에서 실행하여 CUDA 컨텍스트 충돌/Deadlock 방지
+            def _realtime_transcribe_task():
+                self._initialize_model()
+                return self.model.transcribe(
+                    temp_path,
+                    language=language,
+                    beam_size=5,
+                    best_of=5,
+                    temperature=0,
+                    repetition_penalty=1.3,
+                    no_repeat_ngram_size=3,
+                    condition_on_previous_text=False,
+                    initial_prompt="회의 녹음입니다. IT 기술 용어(LLM, GPT, API, Docker, FastAPI, SQL, JSON)는 정확히 영문으로 표기하고 자연스러운 한국어로 작성하세요.",
+                    vad_filter=True,
+                    vad_parameters=dict(
+                        min_silence_duration_ms=500,
+                        speech_pad_ms=500,          
+                        min_speech_duration_ms=100, 
+                        threshold=0.4
+                    )
                 )
-            )
+
+            # 단일 스레드에서 실행
+            segments, info = await asyncio.to_thread(_realtime_transcribe_task)
 
             transcript_text = ""
             for segment in segments:
@@ -291,7 +288,7 @@ class FasterWhisperSTTService:
         10초 청크, 2초 오버랩
         """
         print(f"[청킹 전사 시작] {file_path}")
-        self._initialize_model()
+        print(f"[청킹 전사 시작] {file_path}")
         
         cleaned_path = None
         try:
@@ -301,80 +298,88 @@ class FasterWhisperSTTService:
             print(f"[전처리 중] 잡음 제거 및 오디오 증폭...")
             cleaned_path = await asyncio.to_thread(self._preprocess_audio, file_path, quality="high")
             
-            from pydub import AudioSegment
-            import tempfile
-            import os
-            
-            # 오디오 파일 로드 (전처리된 파일 사용)
-            if cleaned_path:
-                 audio = AudioSegment.from_file(cleaned_path)
-            else:
-                 audio = AudioSegment.from_file(file_path)
-            total_duration_ms = len(audio)
-            total_duration_sec = total_duration_ms / 1000.0
-            print(f"오디오 길이: {total_duration_sec:.2f}초")
-            
-            # 청킹 설정 (문맥 유지를 위해 30초 단위로 상향)
-            CHUNK_LENGTH_MS = 30000  # 30초
-            OVERLAP_MS = 5000        # 5초 오버랩
-            STEP_MS = CHUNK_LENGTH_MS - OVERLAP_MS
-            
-            all_segments = []
-            chunk_count = 0
-            
-            # 청크별 처리
-            for start_ms in range(0, total_duration_ms, STEP_MS):
-                end_ms = min(start_ms + CHUNK_LENGTH_MS, total_duration_ms)
-                chunk = audio[start_ms:end_ms]
-                chunk_count += 1
+            # [수정] 전체 청킹 전사 로직을 별도 스레드로 격리하여 Blocking 방지
+            def _transcribe_chunked_in_thread():
+                self._initialize_model()
+
+                from pydub import AudioSegment
+                import tempfile
+                import os
                 
-                # 임시 파일로 저장
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                    temp_path = temp_file.name
-                    chunk.export(temp_path, format="wav")
+                # 오디오 파일 로드 (전처리된 파일 사용)
+                if cleaned_path:
+                     audio = AudioSegment.from_file(cleaned_path)
+                else:
+                     audio = AudioSegment.from_file(file_path)
+                total_duration_ms = len(audio)
+                total_duration_sec = total_duration_ms / 1000.0
+                print(f"오디오 길이: {total_duration_sec:.2f}초")
                 
-                try:
-                    # [최적화] 청킹 전사 정확도 극대화
-                    segments, info = self.model.transcribe(
-                        temp_path,
-                        language=language,
-                        beam_size=10,
-                        best_of=5,
-                        temperature=0,
-                        repetition_penalty=1.2,
-                        condition_on_previous_text=True, # 청크 간 문맥 유지
-                        initial_prompt="회의 녹음입니다. 전문 용어 표기를 정확히 하고 자연스러운 문장으로 기록하세요.",
-                        vad_filter=True,
-                        vad_parameters=dict(
-                            min_silence_duration_ms=1000,
-                            speech_pad_ms=400
-                        )
-                    )
+                # 청킹 설정 (문맥 유지를 위해 30초 단위로 상향)
+                CHUNK_LENGTH_MS = 30000  # 30초
+                OVERLAP_MS = 5000        # 5초 오버랩
+                STEP_MS = CHUNK_LENGTH_MS - OVERLAP_MS
+                
+                all_segments = []
+                chunk_count = 0
+                
+                # 청크별 처리
+                for start_ms in range(0, total_duration_ms, STEP_MS):
+                    end_ms = min(start_ms + CHUNK_LENGTH_MS, total_duration_ms)
+                    chunk = audio[start_ms:end_ms]
+                    chunk_count += 1
                     
-                    # 세그먼트 수집 (시간 오프셋 보정)
-                    offset_sec = start_ms / 1000.0
-                    for segment in segments:
-                        adjusted_segment = {
-                            "start": segment.start + offset_sec,
-                            "end": segment.end + offset_sec,
-                            "text": segment.text.strip()
-                        }
-                        all_segments.append(adjusted_segment)
+                    # 임시 파일로 저장
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+                        temp_path = temp_file.name
+                        chunk.export(temp_path, format="wav")
+                    
+                    try:
+                        # [최적화] 청킹 전사 정확도 극대화
+                        segments, info = self.model.transcribe(
+                            temp_path,
+                            language=language,
+                            beam_size=10,
+                            best_of=5,
+                            temperature=0,
+                            repetition_penalty=1.2,
+                            condition_on_previous_text=True, # 청크 간 문맥 유지
+                            initial_prompt="회의 녹음입니다. 전문 용어 표기를 정확히 하고 자연스러운 문장으로 기록하세요.",
+                            vad_filter=True,
+                            vad_parameters=dict(
+                                min_silence_duration_ms=1000,
+                                speech_pad_ms=400
+                            )
+                        )
                         
-                finally:
-                    # 임시 파일 삭제
-                    if os.path.exists(temp_path):
-                        os.remove(temp_path)
+                        # 세그먼트 수집 (시간 오프셋 보정)
+                        offset_sec = start_ms / 1000.0
+                        for segment in segments:
+                            adjusted_segment = {
+                                "start": segment.start + offset_sec,
+                                "end": segment.end + offset_sec,
+                                "text": segment.text.strip()
+                            }
+                            all_segments.append(adjusted_segment)
+                            
+                    finally:
+                        # 임시 파일 삭제
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                    
+                    # 진행률 업데이트 (주의: 스레드 내부에서 호출되므로 thread-safe해야 함. 보통 간단한 print/callback은 OK)
+                    if progress_callback:
+                        percent = int((end_ms / total_duration_ms) * 100)
+                        progress_callback(percent)
+                    
+                    print(f"  청크 {chunk_count} 처리 완료 ({start_ms/1000:.1f}s ~ {end_ms/1000:.1f}s)")
                 
-                # 진행률 업데이트
-                if progress_callback:
-                    percent = int((end_ms / total_duration_ms) * 100)
-                    progress_callback(percent)
-                
-                print(f"  청크 {chunk_count} 처리 완료 ({start_ms/1000:.1f}s ~ {end_ms/1000:.1f}s)")
+                # 중복 제거 (오버랩 구간)
+                result_segments = self._merge_overlapping_segments(all_segments)
+                return result_segments
             
-            # 중복 제거 (오버랩 구간)
-            result_segments = self._merge_overlapping_segments(all_segments)
+            # 메인 로직 스레드에서 실행
+            result_segments = await asyncio.to_thread(_transcribe_chunked_in_thread)
             
             print(f"청킹 전사 완료: 총 {len(result_segments)}개 세그먼트")
             return result_segments

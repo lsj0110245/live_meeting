@@ -21,6 +21,11 @@
             <i class="fa-solid fa-microphone"></i>
             녹음 시작
         </button>
+        <!-- [New] 일시정지 버튼 -->
+        <button id="btn-pause" class="btn btn-pause" onclick="togglePause()" disabled style="display: none;">
+            <i class="fa-solid fa-pause"></i>
+            일시정지
+        </button>
         <button id="btn-stop" class="btn btn-stop" onclick="isIntentionalStop = true; stopRecording();" disabled>
             <i class="fa-solid fa-stop"></i>
             녹음 중지
@@ -162,6 +167,23 @@
     .btn-stop:disabled {
         background: var(--border);
         cursor: not-allowed;
+    }
+
+    /* [New] 일시정지/재개 버튼 스타일 */
+    .btn-pause {
+        background: var(--warning);
+        /* 노란색 계열 */
+        color: #000;
+        font-size: 1.1rem;
+        padding: 15px 40px;
+    }
+
+    .btn-resume {
+        background: var(--success);
+        /* 초록색 계열 */
+        color: #fff;
+        font-size: 1.1rem;
+        padding: 15px 40px;
     }
 
     .recording-timer {
