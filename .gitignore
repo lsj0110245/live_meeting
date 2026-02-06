@@ -70,3 +70,4 @@ htmlcov/
 alembic/versions/*.pyc
 
 media
+ai_models/

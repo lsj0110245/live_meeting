@@ -225,7 +225,7 @@ async def upload_file(
     
     # 5. Background Task로 STT 서비스 호출 (중복 여부와 관계없이 항상 실행)
     print(f"📋 [UPLOAD] Scheduling background task for Meeting ID: {meeting.id}")
-    background_tasks.add_task(run_process_audio_file, meeting.id, file_path)
+    background_tasks.add_task(process_audio_file, meeting.id, file_path)
     
     return {
         "meeting_id": meeting.id,
@@ -271,7 +271,7 @@ async def finalize_recording(
         db.commit()
 
         # [고도화 하이브리드] Whisper 엔진을 이용한 전체 오디오 정밀 재분석 시작
-        background_tasks.add_task(run_process_audio_file, meeting_id, str(file_path))
+        background_tasks.add_task(process_audio_file, meeting_id, str(file_path))
         
         return {"status": "success", "message": "Recording finalized, re-transcription started"}
     except Exception as e:

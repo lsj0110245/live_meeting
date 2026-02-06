@@ -79,10 +79,14 @@ services:
     image: ollama/ollama:latest
     container_name: lm_llm
     restart: always
+    env_file:
+      - .env
     environment:
       - OLLAMA_KEEP_ALIVE=0
     volumes:
       - ./ai_models:/root/.ollama
+      - ./scripts/ollama_entrypoint.sh:/entrypoint.sh
+    entrypoint: [ "/bin/bash", "/entrypoint.sh" ]
     ports:
       - "11434:11434"
     networks:
