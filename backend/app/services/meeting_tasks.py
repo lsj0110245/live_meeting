@@ -85,14 +85,13 @@ async def process_meeting_summary(meeting_id: int):
         def format_item(item):
             if not item: return "내용 없음"
             
-            # 이미 문자열이고 JSON 포맷({, [)이 아니라면 그대로 반환
+            # 이미 문자열이고 JSON 포맷({, [)이 아이템 자체가 문자열인 경우
             if isinstance(item, str):
                 item = item.strip()
                 
                 # Markdown Code Block 제거 (```json ... ```)
                 if item.startswith('```'):
                     import re
-                    # 첫 줄(```json)과 마지막 줄(```) 제거
                     item = re.sub(r'^```[a-zA-Z]*\n', '', item)
                     item = re.sub(r'\n```$', '', item)
                     item = item.strip()
@@ -100,40 +99,46 @@ async def process_meeting_summary(meeting_id: int):
                 if not (item.startswith('{') or item.startswith('[')):
                     return item
                 
-                # JSON 문자열 파싱 시도 (ast -> json 순서)
+                # JSON 문자열 파싱 시도
                 try:
                     import ast
-                    # 1. Python Dictionary Style (Single Quotes)
                     item = ast.literal_eval(item)
                 except:
                     try:
                         import json
-                        # 2. Standard JSON Style (Double Quotes)
                         item = json.loads(item)
                     except:
                         return item # 파싱 실패 시 원본 반환
 
-            # Dictionary 처리
-            if isinstance(item, dict):
-                lines = []
-                for k, v in item.items():
-                    # 키가 숫자인 경우(순서) 무시하거나 포맷팅
-                    clean_key = k.lstrip('- ').strip()
-                    lines.append(f"- **{clean_key}**: {v}")
-                return "\n".join(lines)
-            
-            # Set 처리 (순서가 없으므로 정렬)
-            if isinstance(item, set):
-                # set을 리스트로 변환 및 정렬
-                item = sorted(list(item), key=str)
-                # 아래 List 처리 로직으로 흐르도록 하거나 직접 반환
-                return "\n".join([f"- {str(x).strip()}" for x in item])
-
-            # List 처리
-            if isinstance(item, list):
-                return "\n".join([f"- {str(x).strip()}" for x in item])
+            # 재귀적 포맷팅 함수 정의
+            def recursive_format(val, level=0):
+                indent = "  " * level
+                if isinstance(val, dict):
+                    lines = []
+                    for k, v in val.items():
+                        clean_key = k.lstrip('- ').strip()
+                        # 키가 의미 있는 내용이면 볼드 처리, 아니면 값만 표시
+                        if isinstance(v, (dict, list)):
+                            lines.append(f"{indent}- **{clean_key}**")
+                            lines.append(recursive_format(v, level + 1))
+                        else:
+                            lines.append(f"{indent}- **{clean_key}**: {str(v)}")
+                    return "\n".join(lines)
                 
-            return str(item)
+                elif isinstance(val, list) or isinstance(val, set):
+                    lines = []
+                    for x in val:
+                        # 리스트 내부 아이템이 문자열이면 단순 불렛, 복잡하면 재귀
+                        if isinstance(x, str):
+                            lines.append(f"{indent}- {x}")
+                        else:
+                            lines.append(recursive_format(x, level))
+                    return "\n".join(lines)
+                
+                else:
+                    return f"{indent}{str(val)}"
+
+            return recursive_format(item)
 
         markdown_content = f"""# {meeting.title} 회의록
 
