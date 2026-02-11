@@ -298,34 +298,10 @@ async def websocket_endpoint(
                         try: 
                             metadata = message.get("data", {})
                             session.metadata = metadata
-                            is_reconnect = metadata.get("reconnect", False)
-                            existing_meeting_id = metadata.get("meeting_id")
-
-                            if is_reconnect and existing_meeting_id:
-                                # [New] 재연결 로직: 기존 회의 정보 로드
-                                meeting = db.query(Meeting).filter(Meeting.id == existing_meeting_id).first()
-                                if meeting:
-                                    session.meeting_id = meeting.id
-                                    print(f"[WebSocket] Reconnected to existing Meeting: ID={meeting.id}")
-                                    
-                                    # 다음 세그먼트 인덱스 계산 (중복 방지)
-                                    segment_count = db.query(Transcript).filter(Transcript.meeting_id == meeting.id).count()
-                                    session.segment_index = segment_count
-                                    
-                                    # 기존 오디오 파일 경로 재사용
-                                    from app.core.config import settings
-                                    file_filename = f"realtime_{meeting.id}.webm"
-                                    session.audio_path = str(settings.MEDIA_ROOT / file_filename)
-                                    
-                                    await manager.send_json(client_id, {
-                                        "type": "reconnected",
-                                        "meeting_id": meeting.id,
-                                        "next_segment": segment_count
-                                    })
-                                    continue
                             
-                            # 신규 회의 생성 (재연결이 아니거나 기존 회의가 없는 경우)
+                            # Meeting 레코드 생성
                             from app.utils import get_unique_title
+                            
                             raw_title = metadata.get("title", "제목 없음")
                             safe_title = get_unique_title(db, raw_title)
                             
@@ -367,10 +343,10 @@ async def websocket_endpoint(
                             })
                         except Exception as e:
                             db.rollback()
-                            print(f"Meeting creation/resume failed: {e}")
+                            print(f"Meeting creation failed: {e}")
                             await manager.send_json(client_id, {
                                 "type": "error",
-                                "message": "회의 생성 또는 복구 중 오류가 발생했습니다."
+                                "message": "회의 생성 중 오류가 발생했습니다."
                             })
                         continue
                         

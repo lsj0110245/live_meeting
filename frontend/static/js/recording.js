@@ -29,11 +29,6 @@ const transcriptContent = document.getElementById('transcript-content');
 const fullTranscriptSection = document.getElementById('full-transcript-section');
 const fullTranscriptEl = document.getElementById('full-transcript');
 
-// [New] 재연결 관련 변수
-let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 5;
-const RECONNECT_DELAY = 2000; // 2초
-
 /**
  * WebSocket 연결
  */
@@ -45,35 +40,15 @@ function connectWebSocket() {
         return;
     }
 
-    // [Fix] 재연결 시 동일한 clientId를 사용하여 서버에서 세션을 식별할 수 있게 함 (필요 시)
-    // 하지만 현재 서버는 매번 세션을 새로 생성하므로, 우선은 유지만 되도록 함.
-    if (!window.currentClientId) {
-        window.currentClientId = 'client_' + Date.now();
-    }
-    const clientId = window.currentClientId;
+    const clientId = 'client_' + Date.now();
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${window.location.host}/api/recording/ws/${clientId}?token=${token}`;
 
-    console.log(`WebSocket 연결 시도 중... (시도 ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS})`);
     websocket = new WebSocket(wsUrl);
 
     websocket.onopen = function () {
         console.log('WebSocket 연결됨');
-        reconnectAttempts = 0; // 성공 시 카운트 초기화
-        updateStatus('connected', isRecording ? '재연결됨 (녹음 중)' : '연결됨');
-
-        // [New] 만약 녹음 중에 재연결된 것이라면, 현재 진행 중인 메타데이터를 다시 보내서 세션을 복구 시도
-        if (isRecording && meetingMetadata) {
-            console.log('녹음 중 재연결됨. 메타데이터 재전송...');
-            websocket.send(JSON.stringify({
-                type: 'metadata',
-                data: {
-                    ...meetingMetadata,
-                    reconnect: true, // 재연결임을 알림
-                    meeting_id: currentMeetingId // 기존 ID 전달
-                }
-            }));
-        }
+        updateStatus('connected', '연결됨');
     };
 
     websocket.onmessage = function (event) {
@@ -83,26 +58,20 @@ function connectWebSocket() {
 
     websocket.onclose = function () {
         console.log('WebSocket 연결 끊김');
+        updateStatus('disconnected', '연결 끊김');
 
-        // [Fix] 의도하지 않은 끊김이고 녹음 중인 경우 재연결 시도
-        if (isRecording && !isIntentionalStop) {
-            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                reconnectAttempts++;
-                updateStatus('disconnected', `연결 끊김, 재연결 시도 중... (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})`);
-                setTimeout(connectWebSocket, RECONNECT_DELAY);
-            } else {
-                updateStatus('disconnected', '재연결 실패');
-                alert("서버와 연결이 완전히 끊겨 녹음을 중단합니다. 페이지를 새로고침 해주세요.");
-                stopRecording();
+        // [Fix] 연결 끊김 시 처리
+        if (isRecording) {
+            if (!isIntentionalStop) {
+                alert("서버 연결이 끊겨 녹음이 중단되었습니다.");
             }
-        } else {
-            updateStatus('disconnected', '연결 종료');
+            stopRecording();
         }
     };
 
     websocket.onerror = function (error) {
         console.error('WebSocket 에러:', error);
-        // onerror 후 바로 onclose가 호출되므로 여기서 별도 처리는 생략
+        updateStatus('disconnected', '연결 오류');
     };
 }
 
