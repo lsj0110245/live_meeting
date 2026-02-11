@@ -154,6 +154,8 @@ class RealtimeSession:
         self.header_bytes = None # WebM 헤더 저장용
         self.audio_path = None # 오디오 파일 경로
         self.total_duration = 0.0 # 누적 전체 시간 (초)
+        self.is_finalized = False # 최종 요약 완료 여부 (중복 방지)
+        self.is_first_segment = True # 첫 번째 전사 구간 여부
         
     def add_audio_chunk(self, chunk: bytes, chunk_duration: float = 0.5):
         """오디오 청크 추가"""
@@ -165,21 +167,26 @@ class RealtimeSession:
         self.buffer_duration += chunk_duration
         self.total_duration += chunk_duration
         
-    def get_buffer_and_reset(self) -> bytes:
-        """버퍼 데이터 반환 및 초기화"""
+    def get_buffer_and_reset(self) -> tuple[bytes, bool]:
+        """버퍼 데이터 반환 및 초기화 (데이터, 헤더스킵필요여부)"""
         current_data = self.audio_buffer.getvalue()
+        skip_header = False
         
-        # 첫 구간(0~5초)은 header_bytes가 current_data의 시작과 같음
-        # 두 번째 구간(5~10초)부터는 current_data에 헤더가 없으므로 붙여줌
-        if self.header_bytes and not current_data.startswith(self.header_bytes):
-            # [Fix] 중복 방지: header_bytes를 붙여서 WebM 형식을 맞춤
-            data_to_process = self.header_bytes + current_data
+        if self.header_bytes:
+            if self.is_first_segment:
+                # 첫 세그먼트는 헤더가 이미 포함되어 있음
+                data_to_process = current_data
+                self.is_first_segment = False
+            else:
+                # 두 번째부터는 헤더를 붙여주되, 전사 시 중복 방지를 위해 스킵 표시
+                data_to_process = self.header_bytes + current_data
+                skip_header = True
         else:
             data_to_process = current_data
 
         self.audio_buffer = io.BytesIO()
         self.buffer_duration = 0
-        return data_to_process
+        return data_to_process, skip_header
     
     def add_transcript(self, text: str):
         """전사 결과 기록"""
@@ -294,7 +301,62 @@ async def websocket_endpoint(
             "type": "connected",
             "message": f"실시간 STT 연결됨: {user.email}"
         })
+
+        # --- 내부 비동기 태스크 정의 (Hoisting 대응) ---
         
+        # 1. LLM 교정 태스크
+        async def background_correction_task(tid: int, original_text: str, cid: str):
+            try:
+                corrected = await llm_service.correct_transcript(original_text)
+                if corrected and corrected != original_text:
+                    await asyncio.to_thread(_update_transcript_db_sync, tid, corrected)
+                    if manager.is_connected(cid):
+                        await manager.send_json(cid, {
+                            "type": "transcript_update",
+                            "transcript_id": tid,
+                            "text": corrected
+                        })
+            except Exception as e:
+                print(f"Background correction failed: {e}")
+
+        # 2. 중간 요약 태스크
+        async def background_summary_task(text, mid, cid):
+            try:
+                summary = await llm_service.generate_simple_summary(text)
+                if summary and summary.strip():
+                    await manager.send_json(cid, {
+                        "type": "intermediate_summary",
+                        "content": summary
+                    })
+                    db_context = SessionLocal()
+                    try:
+                        from app.models.intermediate_summary import IntermediateSummary
+                        new_is = IntermediateSummary(meeting_id=mid, content=summary)
+                        db_context.add(new_is)
+                        db_context.commit()
+                    except Exception as e:
+                        db_context.rollback()
+                        print(f"Background intermediate summary DB save failed: {e}")
+                    finally:
+                        db_context.close()
+            except Exception as e:
+                print(f"Background intermediate summary task failed: {e}")
+
+        # 3. 최종 정리 및 요약 태스크
+        async def final_cleanup_and_summary(mid, duration, s_obj):
+            if s_obj.is_finalized: return
+            s_obj.is_finalized = True
+            
+            print(f"[Background Task] Starting final summary for meeting {mid}...")
+            try:
+                await asyncio.to_thread(_update_meeting_duration_sync, mid, int(duration))
+                from app.services.meeting_tasks import process_meeting_summary
+                await process_meeting_summary(mid)
+            except Exception as e:
+                print(f"Final cleanup task failed: {e}")
+                await asyncio.to_thread(_force_complete_meeting_sync, mid)
+
+        # --- 루프 시작 ---
         while True:
             # 데이터 수신 (bytes 또는 text)
             try:
@@ -314,7 +376,7 @@ async def websocket_endpoint(
                         if session.meeting_id:
                             print(f"[WebSocket] Stop recording requested for Meeting {session.meeting_id}")
                             # 즉시 최종 처리 태스크 실행
-                            asyncio.create_task(final_cleanup_and_summary(session.meeting_id, session.total_duration))
+                            asyncio.create_task(final_cleanup_and_summary(session.meeting_id, session.total_duration, session))
                         continue
 
                     if message.get("type") == "metadata":
@@ -428,13 +490,16 @@ async def websocket_endpoint(
                         # 버퍼 임계값 도달 시 전사
                         if session.buffer_duration >= BUFFER_THRESHOLD_SECONDS:
                             current_segment_duration = session.buffer_duration
-                            audio_data = session.get_buffer_and_reset()
+                            audio_data, skip_header = session.get_buffer_and_reset()
                             
                             current_transcript_id = None # 초기화
                         
                             try:
-                                # Faster-Whisper로 전사
-                                transcript = await stt_service.transcribe_realtime(audio_data)
+                                # Faster-Whisper로 전사 (헤더 중복 방지 적용)
+                                transcript = await stt_service.transcribe_realtime(
+                                    audio_data, 
+                                    skip_duration_ms=500 if skip_header else 0
+                                )
                                 
                                 if transcript.strip():
                                     session.add_transcript(transcript)
@@ -472,29 +537,6 @@ async def websocket_endpoint(
                                         finally:
                                             db_trans.close()
                                         
-                                        # [하이브리드 전략 2단계] 비동기 LLM 교정 태스크 실행
-                                        async def background_correction_task(tid: int, original_text: str, cid: str):
-                                            try:
-                                                # LLM 문맥 교정 (비동기, 스레드 내부 실행됨)
-                                                corrected = await llm_service.correct_transcript(original_text)
-                                                
-                                                if corrected and corrected != original_text:
-                                                    # DB 업데이트 (Blocking 방지를 위해 별도 스레드 실행)
-                                                    await asyncio.to_thread(_update_transcript_db_sync, tid, corrected)
-                                                    print(f"Transcript {tid} corrected and saved to DB")
-                                                    
-                                                    # 클라이언트에 업데이트 전송 (연결 상태 확인)
-                                                    if manager.is_connected(cid):
-                                                        await manager.send_json(cid, {
-                                                            "type": "transcript_update",
-                                                            "transcript_id": tid,
-                                                            "text": corrected
-                                                        })
-                                                    else:
-                                                        print(f"[LLM] Client {cid} disconnected, skipping WebSocket send")
-                                            except Exception as e:
-                                                print(f"Background correction failed: {e}")
-
                                         # 태스크 스폰
                                         asyncio.create_task(background_correction_task(current_transcript_id, transcript, client_id))
                                     
@@ -511,7 +553,7 @@ async def websocket_endpoint(
                                         print(f"[STT] Client {client_id} disconnected, transcript saved to DB but not sent")
                                     
                             except Exception as e:
-                                db.rollback()
+                                # db.rollback()  # 정의되지 않은 변수 오류 수정
                                 print(f"실시간 전사 오류: {str(e)}")
                                 # 에러 전송 시도 (실패해도 무시)
                                 await manager.send_json(client_id, {
@@ -531,36 +573,6 @@ async def websocket_endpoint(
                         
                         if recent_text.strip():
                             # 백그라운드 태스크로 분리 (메인 루프를 멈추지 않음)
-                            async def background_summary_task(text, mid, cid):
-                                try:
-                                    # 요약 생성
-                                    summary = await llm_service.generate_simple_summary(text)
-                                    
-                                    if summary and summary.strip():
-                                        # 클라이언트에 전송
-                                        await manager.send_json(cid, {
-                                            "type": "intermediate_summary",
-                                            "content": summary
-                                        })
-                                        
-                                        # DB 저장
-                                        db_context = SessionLocal()
-                                        try:
-                                            from app.models.intermediate_summary import IntermediateSummary
-                                            new_is = IntermediateSummary(meeting_id=mid, content=summary)
-                                            db_context.add(new_is)
-                                            db_context.commit()
-                                        except Exception as e:
-                                            db_context.rollback()
-                                            print(f"Background intermediate summary DB save failed: {e}")
-                                        finally:
-                                            db_context.close()
-                                    else:
-                                        print(f"Skipping empty intermediate summary for meeting {mid}")
-                                        
-                                except Exception as e:
-                                    print(f"Background intermediate summary task failed: {e}")
-
                             asyncio.create_task(background_summary_task(recent_text, session.meeting_id, client_id))
                         
                         session.last_summary_time = current_time
@@ -578,14 +590,17 @@ async def websocket_endpoint(
         print(f"[WebSocket] Client {client_id} disconnected.")
         
         # 연결 종료 시 남은 버퍼 처리 및 최종 요약 시도
-        if session and session.meeting_id:
+        if session and session.meeting_id and not session.is_finalized:
             # 1. 남은 오디오 버퍼 처리 (마지막 몇 초 전사)
             if session.buffer_duration > 0:
                 print(f"[WebSocket] Processing remaining buffer ({session.buffer_duration:.1f}s) for Meeting {session.meeting_id}")
-                audio_data = session.get_buffer_and_reset()
+                audio_data, skip_header = session.get_buffer_and_reset()
                 try:
-                    # 동기 호출로 마지막 전사 시도 (짧은 오디오이므로 금방 끝남)
-                    last_transcript = await stt_service.transcribe_realtime(audio_data)
+                    # 동기 호출로 마지막 전사 시도
+                    last_transcript = await stt_service.transcribe_realtime(
+                        audio_data,
+                        skip_duration_ms=500 if skip_header else 0
+                    )
                     if last_transcript.strip():
                         session.add_transcript(last_transcript)
                         # DB 저장
@@ -608,26 +623,11 @@ async def websocket_endpoint(
                     print(f"Failed to transcribe final chunk: {e}")
 
             # 2. 백그라운드 태스크로 전사 완료 처리 및 요약 실행
-            async def final_cleanup_and_summary(mid, duration):
-                print(f"[Background Task] Starting final summary for meeting {mid}...")
-                try:
-                    # 1. 회의 시간 업데이트 (DB Blocking 방지)
-                    await asyncio.to_thread(_update_meeting_duration_sync, mid, int(duration))
-                    print(f"Meeting {mid} finalized (audio/duration). Waiting for summary...")
-
-                    # 2. 통합 요약 및 회의록 생성 (meeting_tasks 모듈 사용)
-                    from app.services.meeting_tasks import process_meeting_summary
-                    await process_meeting_summary(mid)
-
-                except Exception as e:
-                    print(f"Final cleanup task failed: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    # 실패 시 강제 완료 처리
-                    await asyncio.to_thread(_force_complete_meeting_sync, mid)
+            # (함수가 상단에 정의되어 있으므로 그대로 호출 가능)
+            pass
 
             # 태스크 실행
-            asyncio.create_task(final_cleanup_and_summary(session.meeting_id, session.total_duration))
+            asyncio.create_task(final_cleanup_and_summary(session.meeting_id, session.total_duration, session))
 
         if session:
             manager.disconnect(client_id)
@@ -636,5 +636,11 @@ async def websocket_endpoint(
         print(f"[WebSocket] Critical error in WebSocket session: {str(e)}")
         import traceback
         traceback.print_exc()
+        
+        # 예외 발생 시에도 생성된 회의가 있다면 최소한의 정리 시도
+        if session and session.meeting_id and not session.is_finalized:
+            print(f"[WebSocket] Attempting emergency cleanup for meeting {session.meeting_id}")
+            asyncio.create_task(final_cleanup_and_summary(session.meeting_id, session.total_duration, session))
+
         if client_id:
             manager.disconnect(client_id)

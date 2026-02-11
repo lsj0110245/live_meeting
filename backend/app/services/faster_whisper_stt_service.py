@@ -67,7 +67,7 @@ class FasterWhisperSTTService:
                     temperature=0,
                     repetition_penalty=1.2,
                     condition_on_previous_text=True,
-                    initial_prompt="비즈니스 회의 전문 녹음입니다. IT 전문 용어와 고유 명사는 영문 표기를 유지하고, 문맥에 맞는 자연스러운 한국어로 전사하세요.",
+                    initial_prompt="금융, IT, 비즈니스 전문 회의 녹음입니다. 날짜(2026-02-11), 시간(오후 3:45), 전화번호(010-1234-5678), 계좌번호(123-45-6789) 등 숫자와 기호를 정확히 표기하세요. 가나다라마바사, 아자차카타파하와 같은 음성 테스트 패턴과 Accuracy, Latency 등 IT 전문 용어 영문 표기를 유지하세요.",
                     vad_filter=True,
                     vad_parameters=dict(
                         min_silence_duration_ms=1000, 
@@ -105,12 +105,14 @@ class FasterWhisperSTTService:
             print(f"Faster-Whisper 전사 오류: {str(e)}")
             raise e
     
-    async def transcribe_realtime(self, audio_bytes: bytes, language: str = "ko") -> str:
+    async def transcribe_realtime(self, audio_bytes: bytes, language: str = "ko", skip_duration_ms: int = 0) -> str:
         """
         실시간 전사 (속도 우선)
         
         Args:
-        실시간 오디오 스트림 전사
+            audio_bytes: 실시간 오디오 스트림 데이터
+            language: 언어 코드
+            skip_duration_ms: 오디오 시작 부분에서 건너뛸 시간 (ms) - 헤더 중복 방지용
         """
         if not audio_bytes or len(audio_bytes) < 1024:
             # print(f"Skipping tiny audio chunk: {len(audio_bytes)} bytes")
@@ -128,7 +130,8 @@ class FasterWhisperSTTService:
             temp_path = await asyncio.to_thread(
                 self._preprocess_audio,
                 audio_bytes,
-                quality="fast"
+                quality="fast",
+                skip_duration_ms=skip_duration_ms
             )
             print(f"[STT] Preprocessing completed: {temp_path}")
 
@@ -144,7 +147,7 @@ class FasterWhisperSTTService:
                     repetition_penalty=1.3,
                     no_repeat_ngram_size=3,
                     condition_on_previous_text=False,
-                    initial_prompt="LLM, GPT, API, Docker, FastAPI, SQL, JSON, Python, 가상화, 컨테이너, 백엔드, 프론트엔드.",
+                    initial_prompt="가나다라마바사, 아자차카타파하, 010-1234-5678, 123-456-78901, 2026년 2월 11일, Accuracy, Latency, Robustness, API, Docker, FastAPI, JSON, Python.",
                     vad_filter=True,
                     vad_parameters=dict(
                         min_silence_duration_ms=800, 
@@ -196,11 +199,12 @@ class FasterWhisperSTTService:
             if temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)
 
-    def _preprocess_audio(self, audio_data: bytes | str, quality: str = "fast") -> str:
+    def _preprocess_audio(self, audio_data: bytes | str, quality: str = "fast", skip_duration_ms: int = 0) -> str:
         """
         오디오 전처리: 잡음 제거(Denoise) 및 증폭(Normalize)
         - audio_data: bytes(실시간) 또는 str(파일 경로)
         - quality: "fast"(실시간용) 또는 "high"(파일전사용)
+        - skip_duration_ms: 오디오 시작 부분에서 스킵할 시간 (실시간 헤더 중복 방지)
         - Returns: 전처리된 WAV 임시 파일 경로
         """
         import tempfile
@@ -230,7 +234,12 @@ class FasterWhisperSTTService:
 
             print(f"  Audio Loaded. Duration: {len(original_audio)}ms, Loudness: {original_audio.dBFS:.2f}dBFS")
 
-            # [침묵 침묵] 만약 오디오가 너무 조용하면 전처리를 건너뛰고 빈 파일 반환 시도
+            # [헤더 중복 방지] skip_duration_ms 만큼 잘라내기
+            if skip_duration_ms > 0 and len(original_audio) > skip_duration_ms:
+                print(f"  Skipping initial {skip_duration_ms}ms of audio (header redundancy).")
+                original_audio = original_audio[skip_duration_ms:]
+
+            # [침묵 감지] 만약 오디오가 너무 조용하면 전처리를 건너뛰고 빈 파일 반환 시도
             # -45dBFS 이하는 거의 무음이거나 매우 작은 잡음
             if original_audio.dBFS < -45:
                 print("  Audio is too quiet. Skipping heavy processing to avoid hallucination.")

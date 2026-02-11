@@ -248,7 +248,7 @@ function submitMetadata() {
     meetingMetadata = {
         title: document.getElementById('meeting-title-input').value.trim(),
         meeting_type: document.getElementById('meeting-type-input').value.trim(),
-        meeting_date: document.getElementById('meeting-date-input').value,
+        meeting_date: document.getElementById('meeting-date-input').value || null, // 빈 문자열 대신 null 전송
         attendees: document.getElementById('meeting-attendees-input').value.trim(),
         writer: document.getElementById('meeting-writer-input').value.trim(),
         status: 'processing', // 분석 진행 중 상태로 설정 (요약 완료 후 백엔드에서 'completed'로 변경)
@@ -527,7 +527,16 @@ function stopRecording() {
  * 최종 오디오 파일 업로드 (Indexed WebM)
  */
 async function finalizeAudioUpload() {
-    if (!currentMeetingId || audioChunks.length === 0) return;
+    if (!currentMeetingId) return;
+
+    // [중요] 이어서 녹음하기 모드일 때는 브라우저가 현재 세션의 오디오만 가지고 있으므로,
+    // 이를 서버에 업로드하여 전체 오디오 파일을 덮어쓰지 않도록 합니다.
+    if (isResuming) {
+        console.log("Resuming mode: Skipping final audio upload to preserve merged server file.");
+        return;
+    }
+
+    if (audioChunks.length === 0) return;
 
     console.log("Starting final audio upload to finalize metadata...");
     const token = localStorage.getItem('access_token');
@@ -806,13 +815,22 @@ async function loadExistingData(meetingId) {
         isResuming = true;
 
         // 1. 메타데이터 미리 채우기
+        let formattedDate = meeting.meeting_date;
+        if (formattedDate && formattedDate.includes(':')) {
+            // datetime-local 형식으로 변환 (YYYY-MM-DDTHH:mm)
+            formattedDate = formattedDate.substring(0, 16);
+        }
+
         meetingMetadata = {
             title: meeting.title,
             meeting_type: meeting.meeting_type,
-            meeting_date: meeting.meeting_date,
+            meeting_date: formattedDate,
             attendees: meeting.attendees,
             writer: meeting.writer
         };
+
+        const dateInput = document.getElementById('meeting-date-input');
+        if (dateInput) dateInput.value = formattedDate || '';
 
         // 2. 타이머 설정
         recordingSeconds = meeting.duration || 0;

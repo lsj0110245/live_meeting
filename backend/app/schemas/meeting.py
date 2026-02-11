@@ -18,7 +18,7 @@ class MeetingCreate(MeetingBase):
     pass
 
 # 회의 업데이트 요청 (Update)
-class MeetingUpdate(MeetingBase):
+class MeetingUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     meeting_type: Optional[str] = None

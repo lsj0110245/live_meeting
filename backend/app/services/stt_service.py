@@ -37,12 +37,12 @@ class STTService:
             print(f"Faster-Whisper STT Error: {str(e)}")
             raise e
 
-    async def transcribe_realtime(self, audio_data: bytes, language: str = "ko") -> str:
+    async def transcribe_realtime(self, audio_data: bytes, language: str = "ko", skip_duration_ms: int = 0) -> str:
         """
         실시간 전사: 로컬 Faster-Whisper 사용
         """
         try:
-            return await self.faster_whisper.transcribe_realtime(audio_data, language)
+            return await self.faster_whisper.transcribe_realtime(audio_data, language, skip_duration_ms)
         except Exception as e:
             print(f"Faster-Whisper Realtime STT Error: {str(e)}")
             raise e
