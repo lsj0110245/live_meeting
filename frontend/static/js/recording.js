@@ -477,13 +477,7 @@ function stopRecording() {
 
     isRecording = false;
 
-    // [New] 서버에 명시적으로 정지 메시지 전송 (지연 종료 방지)
-    if (websocket && websocket.readyState === WebSocket.OPEN) {
-        websocket.send(JSON.stringify({ type: 'stop' }));
-        console.log('[WebSocket] Sent intentional stop message');
-    }
-
-    // WebSocket 연결 종료
+    // WebSocket 연결 종료 (이것이 서버의 요약 로직을 트리거함)
     if (websocket) {
         websocket.close();
     }

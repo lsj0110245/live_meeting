@@ -141,7 +141,6 @@ class RealtimeSession:
         self.header_bytes = None # WebM 헤더 저장용
         self.audio_path = None # 오디오 파일 경로
         self.total_duration = 0.0 # 누적 전체 시간 (초)
-        self.is_intentional_stop = False # [New] 사용자가 명시적으로 중지했는지 여부
         
     def add_audio_chunk(self, chunk: bytes, chunk_duration: float = 0.5):
         """오디오 청크 추가"""
@@ -191,17 +190,9 @@ class ConnectionManager:
     def __init__(self):
         self.active_sessions: Dict[str, RealtimeSession] = {}
         self.disconnected_clients: set = set()  # 연결이 끊긴 클라이언트 추적
-        self.pending_cleanup_tasks: Dict[str, asyncio.Task] = {} # [New] 종료 대기 중인 태스크
 
     async def connect(self, client_id: str, websocket: WebSocket, user: User):
         await websocket.accept()
-        
-        # [New] 재연결 시 기존 종료 예약 태스크가 있다면 취소
-        if client_id in self.pending_cleanup_tasks:
-            self.pending_cleanup_tasks[client_id].cancel()
-            del self.pending_cleanup_tasks[client_id]
-            print(f"[WebSocket] Canceled pending cleanup for {client_id} due to reconnection.")
-
         self.active_sessions[client_id] = RealtimeSession(websocket, user)
         # 재연결 시 disconnected에서 제거
         if client_id in self.disconnected_clients:
@@ -332,12 +323,6 @@ async def websocket_endpoint(
                                         "next_segment": segment_count
                                     })
                                     continue
-                            
-                            # [New] 사용자의 명시적 중지 명령 (정상 종료)
-                            if message.get("type") == "stop":
-                                session.is_intentional_stop = True
-                                print(f"[WebSocket] Client {client_id} requested intentional stop.")
-                                break # 루프를 빠져나가 Disconnect 블록으로 이동
                             
                             # 신규 회의 생성 (재연결이 아니거나 기존 회의가 없는 경우)
                             from app.utils import get_unique_title
@@ -576,43 +561,24 @@ async def websocket_endpoint(
                 except Exception as e:
                     print(f"Failed to transcribe final chunk: {e}")
 
-            # 2. 백그라운드 태스크로 전사 완료 처리 및 요약 실행 (지연 전략 적용)
-            async def final_cleanup_and_summary_task(mid, duration, cid, is_intentional):
+            # 2. 백그라운드 태스크로 전사 완료 처리 및 요약 실행
+            async def final_cleanup_and_summary(mid, duration):
+                print(f"[Background Task] Starting final summary for meeting {mid}...")
                 try:
-                    if not is_intentional:
-                        # [New] 네트워크 끊김인 경우 60초 대기 (재연결 기회 제공)
-                        print(f"[WebSocket] Waiting 60s before finalizing meeting {mid} (Allow reconnection)...")
-                        await asyncio.sleep(60)
-                    
-                    print(f"[Background Task] Starting final summary for meeting {mid}...")
-                    # 1. 회의 시간 업데이트
+                    # 1. 회의 시간 업데이트 (DB Blocking 방지)
                     await asyncio.to_thread(_update_meeting_duration_sync, mid, int(duration))
-                    
-                    # 2. 통합 요약 생성
+                    print(f"Meeting {mid} finalized (audio/duration). Waiting for summary...")
+
+                    # 2. 통합 요약 및 회의록 생성 (meeting_tasks 모듈 사용)
                     from app.services.meeting_tasks import process_meeting_summary
                     await process_meeting_summary(mid)
-                    print(f"Meeting {mid} finalized successfully.")
 
-                except asyncio.CancelledError:
-                    print(f"[WebSocket] Finalization of meeting {mid} was cancelled (Client reconnected).")
                 except Exception as e:
                     print(f"Final cleanup task failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    # 실패 시 강제 완료 처리
                     await asyncio.to_thread(_force_complete_meeting_sync, mid)
-                finally:
-                    # 매니저에서 태스크 제거
-                    if cid in manager.pending_cleanup_tasks:
-                        del manager.pending_cleanup_tasks[cid]
-
-            # 태스크 생성 및 예약
-            cleanup_task = asyncio.create_task(
-                final_cleanup_and_summary_task(
-                    session.meeting_id, 
-                    session.total_duration, 
-                    client_id, 
-                    session.is_intentional_stop
-                )
-            )
-            manager.pending_cleanup_tasks[client_id] = cleanup_task
 
         if session:
             manager.disconnect(client_id)
