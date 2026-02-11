@@ -39,6 +39,10 @@ class FasterWhisperSTTService:
                 compute_type=self.compute_type
             )
             print("Faster-Whisper 모델 로드 완료")
+
+    def warmup(self):
+        """서버 시작 시 모델 미리 로드"""
+        self._initialize_model()
     
     async def transcribe_file(self, file_path: str, language: str = "ko", progress_callback=None) -> list:
         """

@@ -52,6 +52,21 @@ async def startup_event():
     if not static_dir.exists():
         print(f"WARNING: Static directory not found at {static_dir}")
 
+    # [Optimization] AI 모델 미리 로딩 (콜드 스타트 방지)
+    import asyncio
+    from app.services.faster_whisper_stt_service import faster_whisper_stt_service
+    
+    def load_models():
+        print("🚀 [Startup] Pre-loading AI models into GPU/Memory...")
+        try:
+            faster_whisper_stt_service.warmup()
+            print("✅ [Startup] STT Model weighted and ready.")
+        except Exception as e:
+            print(f"❌ [Startup] Failed to pre-load STT model: {e}")
+
+    # 백그라운드 태스크로 실행하여 서버 시작을 방해하지 않음
+    asyncio.create_task(asyncio.to_thread(load_models))
+
 # 디렉토리가 없으면 생성 (Docker 마운트 이슈 방지용 안전장치)
 if not static_dir.exists():
     print(f"WARNING: Static directory {static_dir} not found. Creating it.")
