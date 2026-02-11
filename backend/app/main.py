@@ -52,6 +52,16 @@ async def startup_event():
     if not static_dir.exists():
         print(f"WARNING: Static directory not found at {static_dir}")
 
+    # [STT 사전 로드] 서버 구동 시 모델 미리 불러오기 (백그라운드)
+    # 첫 전사 시 지연 시간을 제거하기 위함
+    try:
+        from app.services.stt_service import stt_service
+        import asyncio
+        print("INFO: Pre-loading STT model in background...")
+        asyncio.create_task(asyncio.to_thread(stt_service.initialize_model))
+    except Exception as e:
+        print(f"WARNING: Failed to pre-load STT model: {e}")
+
 # 디렉토리가 없으면 생성 (Docker 마운트 이슈 방지용 안전장치)
 if not static_dir.exists():
     print(f"WARNING: Static directory {static_dir} not found. Creating it.")

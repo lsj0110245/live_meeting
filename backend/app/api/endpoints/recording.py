@@ -19,7 +19,20 @@ from app.models.enums import MeetingStatus
 import time
 import asyncio
 
+import threading
+import os
+
 # [Optimization] DB 작업을 위한 동기 헬퍼 함수들 (스레드 풀에서 실행)
+_model_lock = threading.Lock() # 모델 로딩용 전역 락
+
+def _write_audio_sync(path: str, chunk: bytes):
+    """파일 쓰기 작업을 별도 스레드에서 수행 (Blocking 방지)"""
+    try:
+        with open(path, "ab") as f:
+            f.write(chunk)
+    except Exception as e:
+        print(f"Audio write failed: {e}")
+
 def _update_transcript_db_sync(tid: int, corrected_text: str):
     """자막 교정 내용을 DB에 업데이트 (동기)"""
     db = SessionLocal()
@@ -145,24 +158,24 @@ class RealtimeSession:
     def add_audio_chunk(self, chunk: bytes, chunk_duration: float = 0.5):
         """오디오 청크 추가"""
         if self.header_bytes is None:
-            self.header_bytes = chunk # 첫 번째 청크(헤더 포함) 저장
+            # 첫 청크는 WebM의 EBML 헤더를 포함함
+            self.header_bytes = chunk 
             
         self.audio_buffer.write(chunk)
-        # WebM 스트리밍: 각 청크는 독립적인 클러스터로 구성되어야 하며, 
-        # 첫 번째 청크는 반드시 EBML 헤더와 세그먼트 정보를 포함해야 함 (클라이언트 전달 책임)
         self.buffer_duration += chunk_duration
         self.total_duration += chunk_duration
         
     def get_buffer_and_reset(self) -> bytes:
         """버퍼 데이터 반환 및 초기화"""
-        current_buffer_data = self.audio_buffer.getvalue()
+        current_data = self.audio_buffer.getvalue()
         
-        # 헤더가 있고, 현재 버퍼가 헤더로 시작하지 않으면(즉 두 번째 이후 세그먼트면) 헤더를 붙여줌
-        # io.BytesIO.getvalue()는 bytes를 반환하므로 startswith 사용 가능
-        if self.header_bytes and not current_buffer_data.startswith(self.header_bytes):
-            data_to_process = self.header_bytes + current_buffer_data
+        # 첫 구간(0~5초)은 header_bytes가 current_data의 시작과 같음
+        # 두 번째 구간(5~10초)부터는 current_data에 헤더가 없으므로 붙여줌
+        if self.header_bytes and not current_data.startswith(self.header_bytes):
+            # [Fix] 중복 방지: header_bytes를 붙여서 WebM 형식을 맞춤
+            data_to_process = self.header_bytes + current_data
         else:
-            data_to_process = current_buffer_data
+            data_to_process = current_data
 
         self.audio_buffer = io.BytesIO()
         self.buffer_duration = 0
@@ -240,31 +253,37 @@ BUFFER_THRESHOLD_SECONDS = 5  # 5초마다 전사
 async def websocket_endpoint(
     websocket: WebSocket,
     client_id: str,
-    token: str = Query(...),
-    db: Session = Depends(get_db)
+    token: str = Query(...)
 ):
     """
     실시간 STT WebSocket 엔드포인트
-    
-    클라이언트에서 오디오 청크를 전송하면:
-    1. 버퍼에 누적
-    2. 5초 분량이 쌓이면 Faster-Whisper로 전사
-    3. 전사 결과를 JSON으로 반환
     """
+    from app.db.session import SessionLocal
+    
     print(f"[WebSocket] Connection attempt from client: {client_id}")
+    
     # 1. 인증 검증
+    # 인증을 위해 일시적으로 DB 세션 사용
+    auth_db = SessionLocal()
     user = None
     try:
-        user = deps.get_current_user(db, token=token)
+        user = deps.get_current_user(auth_db, token=token)
     except Exception as e:
         print(f"[WebSocket] Authentication failed for {client_id}: {e}")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
+    finally:
+        auth_db.close()
 
     try:
         await manager.connect(client_id, websocket, user)
         session = manager.get_session(client_id)
         print(f"[WebSocket] Client {client_id} connected successfully.")
+        
+        # [Pre-warm] 연결 즉시 STT 모델 미리 로드 (백그라운드)
+        # 첫 5초 데이터가 수집되는 동안 모델을 미리 GPU에 올려 지연을 최소화함
+        asyncio.create_task(asyncio.to_thread(stt_service.initialize_model))
+        
     except Exception as e:
         print(f"[WebSocket] Connection failed: {e}")
         return
@@ -290,20 +309,64 @@ async def websocket_endpoint(
                     # JSON 메타데이터 메시지
                     message = json.loads(data["text"])
                     
+                    if message.get("type") == "stop_recording":
+                        # 사용자가 명시적으로 '중지'를 누른 경우
+                        if session.meeting_id:
+                            print(f"[WebSocket] Stop recording requested for Meeting {session.meeting_id}")
+                            # 즉시 최종 처리 태스크 실행
+                            asyncio.create_task(final_cleanup_and_summary(session.meeting_id, session.total_duration))
+                        continue
+
                     if message.get("type") == "metadata":
-                        # 메타데이터 저장 및 Meeting 생성
+                        # 메타데이터 저장 및 Meeting 생성 (또는 기존 회의 불러오기)
                         from app.models.meeting import Meeting
                         from datetime import datetime
                         
+                        db_meta = SessionLocal()
                         try: 
                             metadata = message.get("data", {})
                             session.metadata = metadata
                             
-                            # Meeting 레코드 생성
+                            # [이어서 녹음하기] meeting_id가 전달된 경우 기존 회의 사용
+                            existing_mid = metadata.get("meeting_id")
+                            if existing_mid:
+                                meeting = db_meta.query(Meeting).filter(Meeting.id == existing_mid, Meeting.owner_id == user.id).first()
+                                if meeting:
+                                    session.meeting_id = meeting.id
+                                    # 기존 녹음 시간 불러오기 (자막 타임라인 연속성 확보)
+                                    session.total_duration = float(meeting.duration or 0.0)
+                                    
+                                    # 기존 자막 인덱스 다음부터 시작
+                                    from app.models.transcript import Transcript
+                                    transcript_count = db_meta.query(Transcript).filter(Transcript.meeting_id == meeting.id).count()
+                                    session.segment_index = transcript_count
+                                    
+                                    # 기존 오디오 파일 경로 확보
+                                    from app.core.config import settings
+                                    if meeting.audio_file_path:
+                                        if meeting.audio_file_path.startswith("media/"):
+                                            abs_file_path = settings.MEDIA_ROOT / meeting.audio_file_path.replace("media/", "", 1)
+                                        else:
+                                            abs_file_path = Path(meeting.audio_file_path)
+                                        session.audio_path = str(abs_file_path)
+                                    
+                                    # 상태를 다시 RECORDING으로 변경
+                                    meeting.status = MeetingStatus.RECORDING
+                                    db_meta.commit()
+                                    
+                                    print(f"Resuming Meeting: ID={meeting.id}, Title={meeting.title}")
+                                    await manager.send_json(client_id, {
+                                        "type": "meeting_created", # 클라이언트 호환성을 위해 동일 타입 사용
+                                        "meeting_id": meeting.id,
+                                        "is_resumed": True
+                                    })
+                                    continue
+
+                            # 기존 로직: 신규 회의 생성
                             from app.utils import get_unique_title
                             
                             raw_title = metadata.get("title", "제목 없음")
-                            safe_title = get_unique_title(db, raw_title)
+                            safe_title = get_unique_title(db_meta, raw_title)
                             
                             meeting = Meeting(
                                 title=safe_title,
@@ -315,25 +378,24 @@ async def websocket_endpoint(
                                 owner_id=user.id,
                                 status=MeetingStatus.RECORDING
                             )
-                            db.add(meeting)
-                            db.commit()
-                            db.refresh(meeting)
+                            db_meta.add(meeting)
+                            db_meta.commit()
+                            db_meta.refresh(meeting)
                             
                             session.meeting_id = meeting.id
                             print(f"Meeting created: ID={meeting.id}, Title={meeting.title}")
                             
-                            # 오디오 파일 경로 설정 및 저장 (settings.MEDIA_ROOT 사용)
+                            # 오디오 파일 경로 설정 및 저장
                             from app.core.config import settings
                             media_root = settings.MEDIA_ROOT
                             media_root.mkdir(parents=True, exist_ok=True)
                             
                             file_filename = f"realtime_{meeting.id}.webm"
-                            # DB에는 서비스 서빙용 상대 경로 저장 (media/...)
                             relative_path = f"media/{file_filename}"
                             meeting.audio_file_path = relative_path
-                            db.commit()
+                            db_meta.commit()
                             
-                            # 세션에 실제 파일 시스템 상의 절대 경로 저장 (쓰기용)
+                            # 세산에 실제 파일 시스템 상의 절대 경로 저장 (쓰기용)
                             abs_file_path = media_root / file_filename
                             session.audio_path = str(abs_file_path)
                             
@@ -342,25 +404,23 @@ async def websocket_endpoint(
                                 "meeting_id": meeting.id
                             })
                         except Exception as e:
-                            db.rollback()
+                            db_meta.rollback()
                             print(f"Meeting creation failed: {e}")
                             await manager.send_json(client_id, {
                                 "type": "error",
                                 "message": "회의 생성 중 오류가 발생했습니다."
                             })
+                        finally:
+                            db_meta.close()
                         continue
                         
                 elif "bytes" in data:
                     # 오디오 데이터
                     audio_chunk = data["bytes"]
                     
-                    # 1. 파일에 저장 (Append)
+                    # 1. 파일에 저장 (Append) - 비동기 처리
                     if session.audio_path:
-                        try:
-                            with open(session.audio_path, "ab") as f:
-                                f.write(audio_chunk)
-                        except Exception as e:
-                            print(f"Audio write failed: {e}")
+                        asyncio.create_task(asyncio.to_thread(_write_audio_sync, session.audio_path, audio_chunk))
 
                         # 2. 버퍼에 추가 (대략 0.5초 청크로 가정)
                         session.add_audio_chunk(audio_chunk, chunk_duration=0.5)
@@ -369,6 +429,8 @@ async def websocket_endpoint(
                         if session.buffer_duration >= BUFFER_THRESHOLD_SECONDS:
                             current_segment_duration = session.buffer_duration
                             audio_data = session.get_buffer_and_reset()
+                            
+                            current_transcript_id = None # 초기화
                         
                             try:
                                 # Faster-Whisper로 전사
@@ -377,30 +439,38 @@ async def websocket_endpoint(
                                 if transcript.strip():
                                     session.add_transcript(transcript)
                                     
-                                    # Meeting에 전사 결과 저장
+                                    # Meeting에 전사 결과 저장 - 독립 세션 사용
                                     if session.meeting_id:
                                         from app.models.transcript import Transcript
                                         
-                                        # 타임스탬프 계산
-                                        end_time = session.total_duration
-                                        start_time = max(0, end_time - current_segment_duration)
-                                        
-                                        transcript_record = Transcript(
-                                            meeting_id=session.meeting_id,
-                                            text=transcript,
-                                            speaker="Unknown",
-                                            start_time=start_time,
-                                            end_time=end_time,
-                                            segment_index=session.segment_index
-                                        )
-                                        db.add(transcript_record)
-                                        db.commit()
-                                        db.refresh(transcript_record) # ID 확보
-                                        
-                                        current_transcript_id = transcript_record.id
-                                        session.segment_index += 1
-                                        
-                                        print(f"[STT] Transcript {current_transcript_id} saved to DB: {transcript[:50]}...")
+                                        db_trans = SessionLocal()
+                                        try:
+                                            # 타임스탬프 계산
+                                            end_time = session.total_duration
+                                            start_time = max(0, end_time - current_segment_duration)
+                                            
+                                            transcript_record = Transcript(
+                                                meeting_id=session.meeting_id,
+                                                text=transcript,
+                                                speaker="Unknown",
+                                                start_time=start_time,
+                                                end_time=end_time,
+                                                segment_index=session.segment_index
+                                            )
+                                            db_trans.add(transcript_record)
+                                            db_trans.commit()
+                                            db_trans.refresh(transcript_record) # ID 확보
+                                            
+                                            current_transcript_id = transcript_record.id
+                                            session.segment_index += 1
+                                            
+                                            print(f"[STT] Transcript {current_transcript_id} saved to DB: {transcript[:50]}...")
+                                        except Exception as e:
+                                            db_trans.rollback()
+                                            print(f"Transcript DB save error: {e}")
+                                            current_transcript_id = None
+                                        finally:
+                                            db_trans.close()
                                         
                                         # [하이브리드 전략 2단계] 비동기 LLM 교정 태스크 실행
                                         async def background_correction_task(tid: int, original_text: str, cid: str):
@@ -555,6 +625,9 @@ async def websocket_endpoint(
                     traceback.print_exc()
                     # 실패 시 강제 완료 처리
                     await asyncio.to_thread(_force_complete_meeting_sync, mid)
+
+            # 태스크 실행
+            asyncio.create_task(final_cleanup_and_summary(session.meeting_id, session.total_duration))
 
         if session:
             manager.disconnect(client_id)

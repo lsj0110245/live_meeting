@@ -32,13 +32,17 @@ class FasterWhisperSTTService:
     def _initialize_model(self):
         """모델 초기화 (필요 시에만 로드)"""
         if self.model is None:
-            print(f"Faster-Whisper 모델 초기화 중: {self.model_size}")
-            self.model = WhisperModel(
-                self.model_size,
-                device=self.device,
-                compute_type=self.compute_type
-            )
-            print("Faster-Whisper 모델 로드 완료")
+            # [Fix] 전역 락을 사용하여 레이스 컨디션 방지
+            from app.api.endpoints.recording import _model_lock
+            with _model_lock:
+                if self.model is None: # 이중 체크
+                    print(f"Faster-Whisper 모델 초기화 중: {self.model_size}")
+                    self.model = WhisperModel(
+                        self.model_size,
+                        device=self.device,
+                        compute_type=self.compute_type
+                    )
+                    print("Faster-Whisper 모델 로드 완료")
     
     async def transcribe_file(self, file_path: str, language: str = "ko", progress_callback=None) -> list:
         """
@@ -140,14 +144,16 @@ class FasterWhisperSTTService:
                     repetition_penalty=1.3,
                     no_repeat_ngram_size=3,
                     condition_on_previous_text=False,
-                    initial_prompt="회의 녹음입니다. IT 기술 용어(LLM, GPT, API, Docker, FastAPI, SQL, JSON)는 정확히 영문으로 표기하고 자연스러운 한국어로 작성하세요.",
+                    initial_prompt="LLM, GPT, API, Docker, FastAPI, SQL, JSON, Python, 가상화, 컨테이너, 백엔드, 프론트엔드.",
                     vad_filter=True,
                     vad_parameters=dict(
-                        min_silence_duration_ms=500,
-                        speech_pad_ms=500,          
-                        min_speech_duration_ms=100, 
-                        threshold=0.4
-                    )
+                        min_silence_duration_ms=800, 
+                        speech_pad_ms=400,          
+                        min_speech_duration_ms=300, 
+                        threshold=0.5               
+                    ),
+                    no_speech_threshold=0.6,
+                    log_prob_threshold=-1.0
                 )
 
             # 단일 스레드에서 실행
@@ -156,10 +162,14 @@ class FasterWhisperSTTService:
             transcript_text = ""
             for segment in segments:
                 text = segment.text.strip()
-                # print(f"Detected Segment: {text}") # 디버그용
+                # print(f"Detected Segment: {text}, Prob: {segment.no_speech_prob:.4f}") # 디버그용
                     
-                # [필터링] 환각 패턴 제거
-                if re.search(r"자막|박진희|vostfr|Subtitles|Thank you|시청해 주셔서", text, re.I):
+                # [필터링] 환각 및 침묵 패턴 제거
+                if segment.no_speech_prob > 0.8: # 확실한 침묵인 경우
+                    continue
+
+                if re.search(r"자막|박진희|vostfr|Subtitles|Thank you|시청해 주셔서|무단 전재|배포 금지|감사합니다", text, re.I):
+                    # 환각 패턴이 포함된 경우 스킵
                     continue
                 
                 if len(text) <= 1:
@@ -218,7 +228,19 @@ class FasterWhisperSTTService:
                 # format="webm" 명시 또는 ffmpeg 프로브 필요할 수 있음.
                 original_audio = AudioSegment.from_file(raw_path)
 
-            print(f"  Audio Loaded. Duration: {len(original_audio)}ms")
+            print(f"  Audio Loaded. Duration: {len(original_audio)}ms, Loudness: {original_audio.dBFS:.2f}dBFS")
+
+            # [침묵 침묵] 만약 오디오가 너무 조용하면 전처리를 건너뛰고 빈 파일 반환 시도
+            # -45dBFS 이하는 거의 무음이거나 매우 작은 잡음
+            if original_audio.dBFS < -45:
+                print("  Audio is too quiet. Skipping heavy processing to avoid hallucination.")
+                # 빈 WAV 파일 생성해서 반환 (Whisper가 무시하도록)
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+                    temp_path = f.name
+                    # 500ms 무음 생성
+                    silent_audio = AudioSegment.silent(duration=500, frame_rate=16000)
+                    silent_audio.export(temp_path, format="wav")
+                return temp_path
 
             # 2. AudioSegment -> Numpy Array 변환
             original_audio = original_audio.set_frame_rate(16000).set_channels(1)

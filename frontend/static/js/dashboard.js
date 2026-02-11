@@ -628,6 +628,12 @@ function renderMeetingList(meetings) {
                         <i class="fa-solid fa-rotate-right"></i> 재분석
                     </button>
                 ` : ''}
+                ${(meeting.status === 'completed' || meeting.status === 'recording') && meeting.description === '실시간 녹음' ? `
+                    <button class="btn btn-sm btn-outline" onclick="event.stopPropagation(); location.href='/recording?resume=${meeting.id}'" 
+                            style="margin-top: 8px; padding: 6px 12px; font-size: 0.85rem; border-color: #3b82f6; color: #3b82f6;">
+                        <i class="fa-solid fa-microphone-lines"></i> 이어서 녹음
+                    </button>
+                ` : ''}
                 ${progressBarHtml}
             </div>
         </div>

@@ -187,31 +187,38 @@ class LLMService:
         STT 전사 텍스트의 오타 및 문맥 보정 (하이브리드 전략 2단계)
         """
         try:
+            if not text or len(text.strip()) <= 1:
+                return text
+
+            if "마이크" in text and "테스트" in text and len(text) < 20:
+                return ""
+
             prompt = f"""
-            당신은 전문 교정 AI입니다. 아래 STT(음성 인식) 텍스트의 오타를 문맥에 맞게 수정하여 출력하십시오.
+            당신은 STT 텍스트 교정기입니다. 다음 텍스트의 오타만 수정하세요.
+            설명, 인사, 사족은 절대 금지합니다. 오직 교정된 결과만 출력하세요.
+            내용이 없거나 무의미하면 공백을 출력하세요.
 
-            **[교정 원칙]**
-            1. **사실 유지**: 내용은 절대 변경하지 말고, 명백한 발음 오류만 수정하십시오.
-            2. **용어 보정**: 
-               - "에이아이" -> "AI", "쥐피티" -> "GPT", "도커" -> "Docker" 등 IT 전문 용어는 올바른 표기로 수정하십시오.
-            3. **문맥 보정**:
-               - "서버바" -> "서버가", "사억" -> "4억" 등 문법과 수치를 자연스럽게 다듬으십시오.
-            4. **출력 형식**: 
-               - 부연 설명 없이 **수정된 텍스트만** 출력하십시오.
-               - 문장 맨 앞에 핵심 주제 키워드를 `[키워드]` 형태로 추가하십시오. (예: `[보안] OAuth 인증 이슈가...`)
-
-            [원본 텍스트]:
-            {text}
+            [원본]: {text}
             """
-            
-            # JSON 모드 해제 (단순 텍스트 출력을 위해)
-            # 현재 self.llm 인스턴스는 JSON 출력을 선호할 수 있으므로, 
-            # 단순히 invoke 호출하되, 프롬프트에서 결과만 출력하도록 강력히 지시
             
             response = await asyncio.to_thread(
                 lambda: self.llm.invoke(prompt)
             )
             corrected_text = response.content.strip()
+            
+            # 사족 패턴 제거 (설명조 문구가 포함되면 원본 유지 또는 버림)
+            stop_words = ["제공해 주시면", "수정할 내용이", "어렵습니다", "정보가 필요", "출력하지 않습니다", "추가 정보", "원본 텍스트"]
+            if any(word in corrected_text for word in stop_words):
+                # 만약 주제 키워드만 있고 나머지가 설명이면 비움
+                if len(corrected_text) < 50: 
+                    return "" 
+                return text
+            
+            # [없음] 이나 빈 대괄호 제거
+            corrected_text = corrected_text.replace("[없음]", "").replace("[]", "").strip()
+            
+            if not corrected_text:
+                return ""
             
             # 혹시라도 JSON이나 마크다운으로 감싸져 있으면 제거
             if corrected_text.startswith('"') and corrected_text.endswith('"'):

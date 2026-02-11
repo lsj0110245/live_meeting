@@ -47,6 +47,10 @@ class STTService:
             print(f"Faster-Whisper Realtime STT Error: {str(e)}")
             raise e
 
+    def initialize_model(self):
+        """모델 초기화 (Pre-warm)"""
+        self.faster_whisper._initialize_model()
+
     def cleanup(self):
         """자원 정리"""
         self.faster_whisper.cleanup()

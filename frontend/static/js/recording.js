@@ -13,6 +13,9 @@ let currentMeetingId = null; // 현재 녹음 중인 회의 ID
 let fullTranscript = ""; // 전체 전사 텍스트 저장용
 let isIntentionalStop = false; // [Fix] 사용자가 직접 정지 버튼을 눌렀는지 여부
 let isPaused = false; // [New] 일시정지 상태
+let recordingSeconds = 0; // 녹음 시간 (초)
+let recordingTimer = null; // 타이머 객체
+let isResuming = false; // [New] 이어서 녹음하기 모드 여부
 
 // DOM 요소
 const statusDot = document.querySelector('.status-dot');
@@ -116,6 +119,10 @@ function handleWebSocketMessage(data) {
         case 'meeting_created':
             currentMeetingId = data.meeting_id;
             console.log('회의 생성됨 ID:', currentMeetingId);
+            if (data.is_resumed) {
+                console.log('회의 이어서 녹음 시작됨');
+                isResuming = true;
+            }
             break;
     }
 }
@@ -144,6 +151,13 @@ function startRecording() {
  * 즉시 녹음 시작 (기본 메타데이터 사용)
  */
 function startRecordingImmediate() {
+    // 이어서 녹음하기인 경우 기존 ID와 메타데이터 유지
+    if (isResuming && meetingMetadata) {
+        console.log('Resuming with existing metadata:', meetingMetadata);
+        startRecordingWithMetadata();
+        return;
+    }
+
     // 즉시 녹음 시작 (기본 메타데이터 사용)
     currentMeetingId = null; // 초기화
 
@@ -336,6 +350,16 @@ async function startRecordingWithMetadata() {
 
         // 메타데이터 전송 (필수)
         if (meetingMetadata) {
+            // URL 파라미터에서 meetingId 가져오기 (이어서 녹음하기용)
+            const urlParams = new URLSearchParams(window.location.search);
+            const resumeMeetingId = urlParams.get('resume');
+
+            if (resumeMeetingId) {
+                meetingMetadata.meeting_id = parseInt(resumeMeetingId);
+                isResuming = true;
+                console.log('이어서 녹음하기 시도:', resumeMeetingId);
+            }
+
             websocket.send(JSON.stringify({
                 type: 'metadata',
                 data: meetingMetadata
@@ -379,12 +403,18 @@ async function startRecordingWithMetadata() {
         isPaused = false;
 
         recordingTimerEl.style.display = 'flex';
-        bufferStatus.style.display = 'block';
-        transcriptContent.innerHTML = '';
+        // 이어서 녹음인 경우 기존 내용을 유지
+        if (!isResuming) {
+            transcriptContent.innerHTML = '';
+            recordingSeconds = 0;
+        } else {
+            // 이어서 녹음 시 이미 로드된 데이터가 있으므로 버퍼링 텍스트만 초기화 느낌으로
+            bufferText.textContent = '버퍼링: 연결 중...';
+        }
         updateStatus('recording', '녹음 중...');
 
         // 타이머 시작
-        recordingSeconds = 0;
+        if (recordingTimer) clearInterval(recordingTimer);
         recordingTimer = setInterval(updateTimer, 1000);
 
     } catch (error) {
@@ -446,8 +476,12 @@ function stopRecording() {
 
     isRecording = false;
 
-    // WebSocket 연결 종료 (이것이 서버의 요약 로직을 트리거함)
+    // WebSocket 연결 종료
     if (websocket) {
+        // [New] 서버에 명시적으로 녹음 중지 알림 전송 (즉시 요약 트리거)
+        if (websocket.readyState === WebSocket.OPEN) {
+            websocket.send(JSON.stringify({ type: 'stop_recording' }));
+        }
         websocket.close();
     }
 
@@ -703,22 +737,48 @@ document.addEventListener('DOMContentLoaded', function () {
     // WebSocket 연결
     connectWebSocket();
 
+    // 이어서 녹음하기 체크
+    const urlParams = new URLSearchParams(window.location.search);
+    const resumeMeetingId = urlParams.get('resume');
+    if (resumeMeetingId) {
+        console.log('Resume ID detected:', resumeMeetingId);
+        loadExistingData(resumeMeetingId);
+    }
+
     // 메타데이터 제출 버튼 이벤트 연결 (즉시 시작 모드 대응)
     const submitBtn = document.getElementById('metadata-submit-btn');
     if (submitBtn) {
         submitBtn.onclick = submitMetadata;
     }
 
-    // [Fix] 의도적인 정지 감지
+    // [Fix] 의도적인 정지 감지 및 확인절차 추가
     if (btnStop) {
         btnStop.addEventListener('click', function () {
-            isIntentionalStop = true;
+            if (confirm('녹음을 중지하고 내용을 저장하시겠습니까?')) {
+                isIntentionalStop = true;
+                stopRecording();
+            }
+        });
+    }
+
+    // [Fix] 로고 버튼 클릭 시 정지 기능 연동 (일관성 유지)
+    const logo = document.querySelector('.logo');
+    if (logo) {
+        logo.addEventListener('click', function (e) {
+            if (isRecording) {
+                e.preventDefault(); // 즉시 이동 차단
+                if (confirm('현재 녹음을 종료하고 저장하시겠습니까?')) {
+                    isIntentionalStop = true;
+                    stopRecording();
+                }
+            }
         });
     }
 });
 
 // 페이지 이탈 시 정리
 window.addEventListener('beforeunload', function () {
+    isIntentionalStop = true; // [Fix] 페이지 이탈 시에는 경고창을 띄우지 않음
     if (websocket) {
         websocket.close();
     }
@@ -726,6 +786,66 @@ window.addEventListener('beforeunload', function () {
         mediaRecorder.stop();
     }
 });
+
+/**
+ * [New] 이어서 녹음 시 기존 데이터 로드
+ */
+async function loadExistingData(meetingId) {
+    const token = localStorage.getItem('access_token');
+    if (!token) return;
+
+    try {
+        const response = await fetch(`/api/meeting/${meetingId}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!response.ok) throw new Error('기존 회의 기록을 불러올 수 없습니다.');
+
+        const meeting = await response.json();
+        currentMeetingId = meeting.id;
+        isResuming = true;
+
+        // 1. 메타데이터 미리 채우기
+        meetingMetadata = {
+            title: meeting.title,
+            meeting_type: meeting.meeting_type,
+            meeting_date: meeting.meeting_date,
+            attendees: meeting.attendees,
+            writer: meeting.writer
+        };
+
+        // 2. 타이머 설정
+        recordingSeconds = meeting.duration || 0;
+        const minutes = Math.floor(recordingSeconds / 60);
+        const seconds = recordingSeconds % 60;
+        timerDisplay.textContent = String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+
+        // 3. 기존 전사 데이터 표시
+        if (meeting.transcripts && meeting.transcripts.length > 0) {
+            // Placeholder 제거
+            const placeholder = transcriptContent.querySelector('.placeholder-text');
+            if (placeholder) placeholder.remove();
+
+            meeting.transcripts.sort((a, b) => a.start_time - b.start_time).forEach(t => {
+                appendTranscript(t.text, t.id);
+            });
+            console.log(`Loaded ${meeting.transcripts.length} existing transcripts.`);
+        }
+
+        // 4. 중간 요약 표시
+        if (meeting.intermediate_summaries && meeting.intermediate_summaries.length > 0) {
+            meeting.intermediate_summaries.sort((a, b) => new Date(a.created_at) - new Date(b.created_at)).forEach(is => {
+                appendIntermediateSummary(is.content);
+            });
+        }
+
+        updateStatus('ready', '기존 기록 로드됨 (녹음 시작 가능)');
+
+    } catch (err) {
+        console.error('Failed to load existing meeting:', err);
+        alert('이전 기록을 불러오지 못했습니다.');
+    }
+}
 
 // CSS 애니메이션 추가
 const style = document.createElement('style');
