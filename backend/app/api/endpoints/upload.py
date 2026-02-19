@@ -282,3 +282,102 @@ async def finalize_recording(
         print(f"❌ [Finalize] Failed: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/recording/{meeting_id}/concat-resume")
+async def concat_resume_recording(
+    meeting_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_user)
+):
+    """
+    [이어서 녹음] 세션 종료 후 FFmpeg로 오디오 합치기
+    - 이어서 녹음 세션 오디오를 이전 세션 파일과 FFmpeg로 합치기
+    - 합친 후 임시 파일 삭제, Duration 헤더 복구
+    """
+    import subprocess
+    import os as _os
+
+    meeting = db.query(Meeting).filter(Meeting.id == meeting_id, Meeting.owner_id == current_user.id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    if not file.filename.endswith(('.webm', '.wav', '.mp3')):
+        raise HTTPException(status_code=400, detail="Invalid audio format")
+
+    try:
+        # 1. 새 세션 오디오를 임시 파일로 저장
+        import time as _time
+        temp_filename = f"realtime_{meeting_id}_resume_upload_{int(_time.time())}.webm"
+        temp_path = settings.MEDIA_ROOT / temp_filename
+
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        print(f"✅ [ConcatResume] New session audio saved as temp: {temp_filename}")
+
+        # 2. 기존 오디오 파일 경로 확인
+        if not meeting.audio_file_path:
+            raise HTTPException(status_code=400, detail="No existing audio file found for this meeting")
+
+        if meeting.audio_file_path.startswith("media/"):
+            existing_path = settings.MEDIA_ROOT / meeting.audio_file_path.replace("media/", "", 1)
+        else:
+            existing_path = Path(meeting.audio_file_path)
+
+        if not existing_path.exists():
+            # 기존 파일이 없으면 새 세션 파일을 기본 파일로 사용
+            shutil.move(str(temp_path), str(existing_path))
+            print(f"⚠️ [ConcatResume] Existing audio not found. Using new session audio as main file.")
+            return {"status": "success", "message": "No existing audio, using new session audio as main file"}
+
+        # 3. FFmpeg 콘카테네이션 파일 목록 작성
+        merged_filename = f"realtime_{meeting_id}_merged_{int(_time.time())}.webm"
+        merged_path = settings.MEDIA_ROOT / merged_filename
+
+        # FFmpeg concat: 오디오 스트림을 독립적으로 연결 (filter_complex 사용)
+        ffmpeg_cmd = [
+            "ffmpeg", "-y",
+            "-i", str(existing_path),
+            "-i", str(temp_path),
+            "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1[a]",
+            "-map", "[a]",
+            "-c:a", "libopus",
+            str(merged_path)
+        ]
+
+        print(f"🔧 [ConcatResume] Running FFmpeg concat...")
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=120)
+
+        if result.returncode != 0:
+            print(f"❌ [ConcatResume] FFmpeg failed: {result.stderr}")
+            # FFmpeg 실패 시: 새 세션 파일만 임시로 보관 (입시다 수동 복원 가능)
+            _os.remove(temp_path)
+            raise HTTPException(status_code=500, detail=f"FFmpeg concat failed: {result.stderr[-200:]}")
+
+        # 4. 합츸된 파일로 기존 파일 교체
+        _os.replace(str(merged_path), str(existing_path))
+        _os.remove(temp_path)
+        print(f"✅ [ConcatResume] Concat complete. Merged file saved to: {existing_path.name}")
+
+        # 5. Duration 헤더 복구 (background)
+        from app.api.endpoints.recording import _repair_audio_duration_sync
+        background_tasks.add_task(_repair_audio_duration_sync, str(existing_path))
+
+        return {"status": "success", "message": "Audio sessions merged successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ [ConcatResume] Failed: {e}")
+        import traceback
+        traceback.print_exc()
+        # 임시 파일 정리
+        try:
+            if temp_path.exists():
+                _os.remove(temp_path)
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))

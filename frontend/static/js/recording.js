@@ -569,41 +569,37 @@ function updateResumeButtonState(isResumeMode) {
  */
 async function finalizeAudioUpload() {
     if (!currentMeetingId) return;
-
-    // [중요] 이어서 녹음하기 모드일 때는 브라우저가 현재 세션의 오디오만 가지고 있으므로,
-    // 이를 서버에 업로드하여 전체 오디오 파일을 덮어쓰지 않도록 합니다.
-    if (isResuming) {
-        console.log("Resuming mode: Skipping final audio upload to preserve merged server file.");
-        return;
-    }
-
     if (audioChunks.length === 0) return;
 
-    console.log("Starting final audio upload to finalize metadata...");
     const token = localStorage.getItem('access_token');
-
-    // 조각들을 하나의 Blob으로 합침 (브라우저가 이 과정에서 Duration 등을 포함한 정규 WebM 생성)
     const finalBlob = new Blob(audioChunks, { type: 'audio/webm' });
-
     const formData = new FormData();
     formData.append('file', finalBlob, 'recording.webm');
 
+    // 이어서 녹음: concat-resume 엔드포인트로 FFmpeg 합치기
+    // 일반 녹음: finalize 엔드포인트로 오디오 파일 교체
+    const endpoint = isResuming
+        ? `/api/upload/recording/${currentMeetingId}/concat-resume`
+        : `/api/upload/recording/${currentMeetingId}/finalize`;
+
+    console.log(`Uploading audio to: ${endpoint}`);
+
     try {
-        const response = await fetch(`/api/upload/recording/${currentMeetingId}/finalize`, {
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` },
             body: formData
         });
 
         if (response.ok) {
-            console.log("✅ Audio finalized successfully.");
+            const result = await response.json();
+            console.log(`✅ Audio upload success: ${result.message}`);
         } else {
-            console.error("❌ Failed to finalize audio:", await response.text());
+            console.error("❌ Audio upload failed:", await response.text());
         }
     } catch (err) {
-        console.error("❌ Error uploading final audio:", err);
+        console.error("❌ Error uploading audio:", err);
     } finally {
-        // 메모리 해제
         audioChunks = [];
     }
 }

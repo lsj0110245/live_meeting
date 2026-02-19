@@ -194,6 +194,8 @@ class RealtimeSession:
         self.total_duration = 0.0 # 누적 전체 시간 (초)
         self.is_finalized = False # 최종 요약 완료 여부 (중복 방지)
         self.is_first_segment = True # 첫 번째 전사 구간 여부
+        self.is_resume_session = False # 이어서 녹음 세션 여부
+        self.original_audio_path = None # 이어서 녹음 시 기존 오디오 파일 경로
         
     def add_audio_chunk(self, chunk: bytes, chunk_duration: float = 0.5):
         """오디오 청크 추가"""
@@ -388,9 +390,12 @@ async def websocket_endpoint(
             print(f"[Background Task] Starting final summary for meeting {mid}...")
             try:
                 # [Fix] 오디오 파일 헤더(Duration) 갱신 (FFmpeg)
-                if s_obj.audio_path:
-                    print(f"[Background Task] Repairing audio duration logic for {s_obj.audio_path}...")
+                # 이어서 녹음 세션은 클라이언트의 concat-resume 업로드가 처리하므로 여기서는 skip
+                if s_obj.audio_path and not s_obj.is_resume_session:
+                    print(f"[Background Task] Repairing audio duration for {s_obj.audio_path}...")
                     await asyncio.to_thread(_repair_audio_duration_sync, s_obj.audio_path)
+                elif s_obj.is_resume_session:
+                    print(f"[Background Task] Resume session: audio repair deferred to concat-resume endpoint.")
 
                 await asyncio.to_thread(_update_meeting_duration_sync, mid, int(duration))
                 from app.services.meeting_tasks import process_meeting_summary
@@ -493,14 +498,20 @@ async def websocket_endpoint(
                                     transcript_count = db_meta.query(Transcript).filter(Transcript.meeting_id == meeting.id).count()
                                     session.segment_index = transcript_count
                                     
-                                    # 기존 오디오 파일 경로 확보
+                                    # [이어서 녹음] 임시 파일에 별도 저장 (기존 파일 corruption 방지)
                                     from app.core.config import settings
+                                    import time as _time
+                                    session.is_resume_session = True
                                     if meeting.audio_file_path:
                                         if meeting.audio_file_path.startswith("media/"):
                                             abs_file_path = settings.MEDIA_ROOT / meeting.audio_file_path.replace("media/", "", 1)
                                         else:
                                             abs_file_path = Path(meeting.audio_file_path)
-                                        session.audio_path = str(abs_file_path)
+                                        session.original_audio_path = str(abs_file_path)
+                                    # 이어서 녹음 세션은 별도 임시 파일에 저장
+                                    resume_filename = f"realtime_{meeting.id}_resume_{int(_time.time())}.webm"
+                                    session.audio_path = str(settings.MEDIA_ROOT / resume_filename)
+                                    print(f"[Resume] Audio will be saved to temp file: {resume_filename}")
                                     
                                     # 상태를 다시 RECORDING으로 변경
                                     meeting.status = MeetingStatus.RECORDING
