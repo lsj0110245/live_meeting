@@ -21,9 +21,47 @@ import asyncio
 
 import threading
 import os
+import subprocess # FFmpeg 호출용
 
 # [Optimization] DB 작업을 위한 동기 헬퍼 함수들 (스레드 풀에서 실행)
 _model_lock = threading.Lock() # 모델 로딩용 전역 락
+
+def _repair_audio_duration_sync(file_path: str):
+    """FFmpeg를 사용하여 오디오 파일의 Duration 정보를 복구 (Remuxing)"""
+    if not file_path or not os.path.exists(file_path):
+        return
+    
+    try:
+        dir_name = os.path.dirname(file_path)
+        file_name = os.path.basename(file_path)
+        temp_path = os.path.join(dir_name, f"temp_{file_name}")
+        
+        # FFmpeg 명령: 재인코딩 없이(-c copy) 컨테이너만 재생성하여 헤더 복구
+        # -y: 덮어쓰기 허용
+        cmd = [
+            "ffmpeg", "-y", 
+            "-i", file_path, 
+            "-c", "copy", 
+            temp_path
+        ]
+        
+        # subprocess 실행
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
+        
+        if result.returncode == 0 and os.path.exists(temp_path):
+            # 성공 시 원본 교체
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            os.rename(temp_path, file_path)
+            print(f"[Audio Repair] Successfully repaired duration for {file_name}")
+        else:
+            print(f"[Audio Repair] FFmpeg failed: {result.stderr}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+                
+    except Exception as e:
+        print(f"[Audio Repair] Exception: {e}")
+
 
 def _write_audio_sync(path: str, chunk: bytes):
     """파일 쓰기 작업을 별도 스레드에서 수행 (Blocking 방지)"""
@@ -349,6 +387,11 @@ async def websocket_endpoint(
             
             print(f"[Background Task] Starting final summary for meeting {mid}...")
             try:
+                # [Fix] 오디오 파일 헤더(Duration) 갱신 (FFmpeg)
+                if s_obj.audio_path:
+                    print(f"[Background Task] Repairing audio duration logic for {s_obj.audio_path}...")
+                    await asyncio.to_thread(_repair_audio_duration_sync, s_obj.audio_path)
+
                 await asyncio.to_thread(_update_meeting_duration_sync, mid, int(duration))
                 from app.services.meeting_tasks import process_meeting_summary
                 await process_meeting_summary(mid)
