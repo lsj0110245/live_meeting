@@ -5,25 +5,33 @@ from app.models.summary import Summary
 from app.services.llm_service import llm_service
 from app.models.enums import MeetingStatus
 
+from app.services.progress_service import progress_service
+
 async def process_meeting_summary(meeting_id: int):
     """
     백그라운드 작업: 회의록 생성 및 저장
     """
     db = SessionLocal()
     try:
+        progress_service.set_progress(meeting_id, 10) # [Progress] 시작
+
         # 1. 전사 데이터 조회
         meeting = db.query(Meeting).filter(Meeting.id == meeting_id).first()
         transcripts = db.query(Transcript).filter(Transcript.meeting_id == meeting_id).order_by(Transcript.start_time).all()
         
         if not transcripts:
             print(f"전사 데이터가 없습니다. 회의 ID: {meeting_id}")
+            progress_service.set_progress(meeting_id, 100) # 데이터 없음 = 완료 처리
             return
+
+        progress_service.set_progress(meeting_id, 20) # [Progress] 데이터 로드 완료
 
         # 전사 텍스트 합치기
         full_text = "\n".join([f"{t.speaker}: {t.text}" for t in transcripts])
         
         # 2. LLM 요약 생성 (Llama 3.1 - 128k Context)
         print(f"회의록 생성 중... 회의 ID: {meeting_id}, 텍스트 길이: {len(full_text)}자")
+        progress_service.set_progress(meeting_id, 30) # [Progress] 요약 생성 시작
         
         # [안전장치] 텍스트가 너무 길면 AI가 멈출 수 있으므로 10,000자 기준으로 분기
         # 10,000자 이하는 통째로, 그 이상은 청킹하여 처리
@@ -31,11 +39,14 @@ async def process_meeting_summary(meeting_id: int):
         
         if len(full_text) > SAFETY_LIMIT:
             print(f"[Safe Mode] 텍스트가 매우 깁니다({len(full_text)}자). 안전을 위해 Map-Reduce 전략 적용", flush=True)
+            # 긴 작업이므로 30->40->... 로 업데이트 필요하지만 여기서는 단순 호출
             summary_data = await _generate_summary_with_chunking(meeting.title, full_text)
         else:
             # 긴 컨텍스트 모델 사용으로 청킹 없이 전체 처리 (정확도 최상)
             summary_data = await llm_service.generate_summary(meeting.title, full_text)
         
+        progress_service.set_progress(meeting_id, 90) # [Progress] 요약 생성 완료 (거의 끝남)
+
         if not summary_data:
             print(f"LLM 응답 없음. 회의 ID: {meeting_id}")
             # 실패 시 기본 요약 생성 (사용자 알림용)
@@ -71,6 +82,8 @@ async def process_meeting_summary(meeting_id: int):
         if is_updated:
             db.add(meeting) # 세션에 추가 (이미 있지만 명시적 업데이트)
             print(f"메타데이터 자동 업데이트 완료. 회의 ID: {meeting_id}")
+
+        progress_service.set_progress(meeting_id, 95) # [Progress] 메타데이터 처리 완료
 
         # 4. 요약 결과 저장 (Summary) - Markdown 변환
         summ = summary_data.get("summary", {})
@@ -173,6 +186,8 @@ async def process_meeting_summary(meeting_id: int):
         db.commit()
         print(f"회의록 생성 완료. 회의 ID: {meeting_id}")
         
+        progress_service.set_progress(meeting_id, 100) # [Progress] 저장 완료 (최종 완료)
+
         # 상태 업데이트 (completed)
         # 단순히 여기에서 completed로 바꾸면, upload.py의 흐름과 겹칠 수 있으나
         # upload.py는 이미 completed 상태에서 이 함수를 호출함.

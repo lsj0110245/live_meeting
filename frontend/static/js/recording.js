@@ -543,6 +543,40 @@ function stopRecording() {
         fullTranscriptEl.value = fullTranscript;
     }
 
+    // [New] 유효성 검사: 녹음 시간이 너무 짧으면(3초 미만) 저장하지 않음
+    if (recordingSeconds < 3 && !isResuming) { // 이어서 녹음인 경우는 제외 (이미 데이터가 있을 수 있음)
+        alert('녹음 시간이 너무 짧아 저장되지 않습니다. (최소 3초)');
+
+        // 서버에 생성된 빈 회의 삭제 요청
+        if (currentMeetingId) {
+            const token = localStorage.getItem('access_token');
+            // DELETE /api/meeting/ (Bulk delete API reuse or single delete) -- Using single delete endpoint logic if available or bulk
+            // Assuming Bulk Delete API exists: DELETE /api/meeting/ with body [id]
+            fetch('/api/meeting/', {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify([currentMeetingId])
+            }).then(() => {
+                console.log('Short recording deleted:', currentMeetingId);
+                currentMeetingId = null;
+            }).catch(e => console.error('Failed to delete short recording:', e));
+        }
+
+        // UI Reset
+        transcriptContent.innerHTML = '';
+        fullTranscriptSection.style.display = 'none';
+        updateStatus('connected', '녹음 취소됨 (시간 부족)');
+
+        // Cleanup global state
+        audioChunks = [];
+        recordingSeconds = 0;
+
+        return; // 여기서 함수 종료 (업로드 및 모달 표시 안 함)
+    }
+
     // 최종 오디오 파일 업로드 (메타데이터/Duration 복구)
     finalizeAudioUpload();
 

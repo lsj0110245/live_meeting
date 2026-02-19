@@ -505,7 +505,6 @@ async function loadMeetings() {
 function getStatusDisplay(status) {
     switch (status) {
         case 'recording':
-            return { text: '녹음 중', class: 'status-recording', icon: 'fa-microphone' };
         case 'processing':
             return { text: 'AI 분석 중 (파일 크기에 따라 소요시간이 다릅니다.)', class: 'status-processing', icon: 'fa-spinner fa-spin' };
         case 'completed':
@@ -537,7 +536,7 @@ function renderMeetingList(meetings) {
     // processing 상태인 회의가 있는지 확인 (Set 업데이트)
     activeProcessingIds.clear();
     filtered.forEach(m => {
-        if (m.status === 'processing') {
+        if (m.status === 'processing' || m.status === 'recording') {
             activeProcessingIds.add(m.id);
         }
     });
@@ -582,7 +581,7 @@ function renderMeetingList(meetings) {
 
         // 진행률 바 (processing 상태일 때만 표시)
         let progressBarHtml = '';
-        if (meeting.status === 'processing') {
+        if (meeting.status === 'processing' || meeting.status === 'recording') {
             progressBarHtml = `
                 <div class="progress-wrapper" style="margin-top:8px; width: 100%;">
                     <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
