@@ -253,6 +253,12 @@ function closeMetadataModal() {
     const form = document.getElementById('metadata-form');
     form.reset();
     modal.style.display = 'none';
+
+    // [New] 녹음 종료 후 확인/수정 단계에서 모달을 취소하면 (확인 안 누름)
+    // -> 대시보드 목록으로 이동 + 상태는 '분석 중'
+    if (window.isEditMode) {
+        window.location.href = '/';
+    }
 }
 
 /**
@@ -425,6 +431,7 @@ async function startRecordingWithMetadata() {
         isPaused = false;
 
         recordingTimerEl.style.display = 'flex';
+        bufferStatus.style.display = 'block';  // [Fix] 진행률 바 표시 활성화
         // 이어서 녹음인 경우 기존 내용을 유지
         if (!isResuming) {
             transcriptContent.innerHTML = '';
@@ -517,7 +524,8 @@ function stopRecording() {
 
     recordingTimerEl.style.display = 'none';
     bufferStatus.style.display = 'none';
-    updateStatus('connected', '녹음 완료');
+    // [New] 녹음 완료 상태를 '분석 중'으로 표시 (메타데이터 입력 단계)
+    updateStatus('processing', '분석 중...');
 
     // 타이머 정지
     if (recordingTimer) {

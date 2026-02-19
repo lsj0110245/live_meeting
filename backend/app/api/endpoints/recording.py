@@ -639,7 +639,8 @@ async def websocket_endpoint(
                                             db_trans.close()
                                         
                                         # 태스크 스폰
-                                        asyncio.create_task(background_correction_task(current_transcript_id, transcript, client_id))
+                                        # [Disable] 실시간 교정 비활성화
+                                        # asyncio.create_task(background_correction_task(current_transcript_id, transcript, client_id))
                                     
                                     # 클라이언트에 1차 전사 결과 전송 (ID 포함)
                                     # 연결이 끊어져도 DB 저장은 이미 완료되었으므로 전송 실패는 무시
