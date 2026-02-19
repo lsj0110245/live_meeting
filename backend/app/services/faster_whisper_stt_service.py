@@ -67,7 +67,7 @@ class FasterWhisperSTTService:
                     temperature=0,
                     repetition_penalty=1.2,
                     condition_on_previous_text=True,
-                    initial_prompt="회의 내용을 기록합니다.",
+                    initial_prompt="회의 녹음입니다. 자연스러운 한국어 문장으로 기록해 주세요.",
                     vad_filter=True,
                     vad_parameters=dict(
                         min_silence_duration_ms=1000, 
@@ -149,7 +149,7 @@ class FasterWhisperSTTService:
                     repetition_penalty=1.3,
                     no_repeat_ngram_size=3,
                     condition_on_previous_text=False,
-                    initial_prompt="회의 내용을 기록합니다.",
+                    initial_prompt="회의 녹음입니다. 자연스러운 한국어 문장으로 기록해 주세요.",
                     vad_filter=True,
                     vad_parameters=dict(
                         min_silence_duration_ms=800, 
@@ -379,7 +379,7 @@ class FasterWhisperSTTService:
                             temperature=0,
                             repetition_penalty=1.2,
                             condition_on_previous_text=True, # 청크 간 문맥 유지
-                            initial_prompt="회의 내용을 기록합니다.",
+                            initial_prompt="회의 녹음입니다. 자연스러운 한국어 문장으로 기록해 주세요.",
                             vad_filter=True,
                             vad_parameters=dict(
                                 min_silence_duration_ms=1000,
