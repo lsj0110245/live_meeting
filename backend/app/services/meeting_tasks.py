@@ -33,17 +33,30 @@ async def process_meeting_summary(meeting_id: int):
         print(f"회의록 생성 중... 회의 ID: {meeting_id}, 텍스트 길이: {len(full_text)}자")
         progress_service.set_progress(meeting_id, 30) # [Progress] 요약 생성 시작
         
-        # [안전장치] 텍스트가 너무 길면 AI가 멈출 수 있으므로 10,000자 기준으로 분기
-        # 10,000자 이하는 통째로, 그 이상은 청킹하여 처리
-        SAFETY_LIMIT = 10000 
+        # [New] 긴 작업을 위해 진행률을 서서히 올리는 내부 태스크
+        import asyncio
+        stop_climb = asyncio.Event()
+        async def slow_climb():
+            p = 31
+            while not stop_climb.is_set() and p < 90:
+                await asyncio.sleep(2) # 2초마다 1%씩 상승
+                if not stop_climb.is_set():
+                    progress_service.set_progress(meeting_id, p)
+                    p += 1
         
-        if len(full_text) > SAFETY_LIMIT:
-            print(f"[Safe Mode] 텍스트가 매우 깁니다({len(full_text)}자). 안전을 위해 Map-Reduce 전략 적용", flush=True)
-            # 긴 작업이므로 30->40->... 로 업데이트 필요하지만 여기서는 단순 호출
-            summary_data = await _generate_summary_with_chunking(meeting.title, full_text)
-        else:
-            # 긴 컨텍스트 모델 사용으로 청킹 없이 전체 처리 (정확도 최상)
-            summary_data = await llm_service.generate_summary(meeting.title, full_text)
+        climb_task = asyncio.create_task(slow_climb())
+        
+        try:
+            # [안전장치] 텍스트가 너무 길면 AI가 멈출 수 있으므로 10,000자 기준으로 분기
+            SAFETY_LIMIT = 10000 
+            if len(full_text) > SAFETY_LIMIT:
+                print(f"[Safe Mode] 텍스트가 매우 깁니다({len(full_text)}자). 안전을 위해 Map-Reduce 전략 적용", flush=True)
+                summary_data = await _generate_summary_with_chunking(meeting.title, full_text)
+            else:
+                summary_data = await llm_service.generate_summary(meeting.title, full_text)
+        finally:
+            stop_climb.set()
+            await climb_task # 클라이밍 태스크 종료 대기
         
         progress_service.set_progress(meeting_id, 90) # [Progress] 요약 생성 완료 (거의 끝남)
 

@@ -696,8 +696,23 @@ async function updateProgressBars() {
                 const data = await res.json();
                 const percent = data.progress || 0;
 
-                bar.style.width = `${percent}%`;
-                text.innerText = `${percent}%`;
+                if (percent === 100) {
+                    bar.style.width = '100%';
+                    text.innerText = '100%';
+
+                    // [New] 100% 도달 시 0.5초 대기 후 목록 새로고침
+                    if (!window.finishedMeetingIds) window.finishedMeetingIds = new Set();
+                    if (!window.finishedMeetingIds.has(id)) {
+                        window.finishedMeetingIds.add(id);
+                        setTimeout(() => {
+                            loadMeetings(); // 완료 상태 반영을 위해 새로고침
+                            window.finishedMeetingIds.delete(id);
+                        }, 500);
+                    }
+                } else {
+                    bar.style.width = `${percent}%`;
+                    text.innerText = `${percent}%`;
+                }
             }
         } catch (e) {
             console.error(`Progress fetch failed for ${id}`, e);
