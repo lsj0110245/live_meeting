@@ -399,6 +399,49 @@ async def websocket_endpoint(
                 print(f"Final cleanup task failed: {e}")
                 await asyncio.to_thread(_force_complete_meeting_sync, mid)
 
+        # 4. 남은 버퍼 처리 태스크 (Helper)
+        async def process_remaining_buffer():
+            if session.buffer_duration > 0:
+                print(f"[WebSocket] Processing remaining buffer ({session.buffer_duration:.1f}s) for Meeting {session.meeting_id}")
+                audio_data, skip_header = session.get_buffer_and_reset()
+                try:
+                    last_transcript = await stt_service.transcribe_realtime(
+                        audio_data,
+                        skip_duration_ms=500 if skip_header else 0
+                    )
+                    if last_transcript.strip():
+                        session.add_transcript(last_transcript)
+                        # DB 저장
+                        from app.models.transcript import Transcript
+                        db_cleanup = SessionLocal()
+                        try:
+                            t_record = Transcript(
+                                meeting_id=session.meeting_id,
+                                text=last_transcript,
+                                speaker="Unknown",
+                                start_time=max(0, session.total_duration - session.buffer_duration),
+                                end_time=session.total_duration,
+                                segment_index=session.segment_index
+                            )
+                            db_cleanup.add(t_record)
+                            db_cleanup.commit()
+                            db_cleanup.refresh(t_record)
+                            
+                            print(f"[STT] Final transcript saved: {last_transcript[:30]}...")
+
+                            # 클라이언트에 마지막 전사 결과 전송 시도
+                            if manager.is_connected(client_id):
+                                await manager.send_json(client_id, {
+                                    "type": "transcript",
+                                    "transcript_id": t_record.id,
+                                    "text": last_transcript,
+                                    "is_final": True
+                                })
+                        finally:
+                            db_cleanup.close()
+                except Exception as e:
+                    print(f"Failed to transcribe final chunk: {e}")
+
         # --- 루프 시작 ---
         while True:
             # 데이터 수신 (bytes 또는 text)
@@ -418,6 +461,10 @@ async def websocket_endpoint(
                         # 사용자가 명시적으로 '중지'를 누른 경우
                         if session.meeting_id:
                             print(f"[WebSocket] Stop recording requested for Meeting {session.meeting_id}")
+                            
+                            # [Fix] 잔여 버퍼 처리
+                            await process_remaining_buffer()
+
                             # 즉시 최종 처리 태스크 실행
                             asyncio.create_task(final_cleanup_and_summary(session.meeting_id, session.total_duration, session))
                         continue
@@ -635,35 +682,7 @@ async def websocket_endpoint(
         # 연결 종료 시 남은 버퍼 처리 및 최종 요약 시도
         if session and session.meeting_id and not session.is_finalized:
             # 1. 남은 오디오 버퍼 처리 (마지막 몇 초 전사)
-            if session.buffer_duration > 0:
-                print(f"[WebSocket] Processing remaining buffer ({session.buffer_duration:.1f}s) for Meeting {session.meeting_id}")
-                audio_data, skip_header = session.get_buffer_and_reset()
-                try:
-                    # 동기 호출로 마지막 전사 시도
-                    last_transcript = await stt_service.transcribe_realtime(
-                        audio_data,
-                        skip_duration_ms=500 if skip_header else 0
-                    )
-                    if last_transcript.strip():
-                        session.add_transcript(last_transcript)
-                        # DB 저장
-                        from app.models.transcript import Transcript
-                        db_cleanup = SessionLocal()
-                        try:
-                            t_record = Transcript(
-                                meeting_id=session.meeting_id,
-                                text=last_transcript,
-                                speaker="Unknown",
-                                start_time=max(0, session.total_duration - session.buffer_duration), # 대략적 계산
-                                end_time=session.total_duration,
-                                segment_index=session.segment_index
-                            )
-                            db_cleanup.add(t_record)
-                            db_cleanup.commit()
-                        finally:
-                            db_cleanup.close()
-                except Exception as e:
-                    print(f"Failed to transcribe final chunk: {e}")
+            await process_remaining_buffer()
 
             # 2. 백그라운드 태스크로 전사 완료 처리 및 요약 실행
             # (함수가 상단에 정의되어 있으므로 그대로 호출 가능)

@@ -244,8 +244,11 @@ async def finalize_recording(
     current_user: User = Depends(deps.get_current_user)
 ):
     """
-    실시간 녹음 종료 후 완성된 오디오 파일을 업로드하여 기존 파일을 교체하고,
-    고품질 전사를 위해 Whisper로 전체 재분석을 수행합니다.
+    실시간 녹음 종료 후 완성된 오디오 파일을 업로드하여 기존 파일을 교체합니다.
+    
+    ⚠️ [중요] 실시간 STT로 저장된 기존 전사 데이터는 건드리지 않습니다.
+    오디오 파일 저장과 Duration 헤더 복구만 수행합니다.
+    (기존에 process_audio_file을 호출하여 전사 결과를 전부 삭제하던 로직 제거)
     """
     meeting = db.query(Meeting).filter(Meeting.id == meeting_id, Meeting.owner_id == current_user.id).first()
     if not meeting:
@@ -260,21 +263,21 @@ async def finalize_recording(
         filename = f"realtime_{meeting_id}.webm"
         file_path = settings.MEDIA_ROOT / filename
         
-        # 실제 파일 시스템에 쓰기 (기존 조각 파일 덮어쓰기)
+        # 완성된 오디오 파일 저장 (기존 조각 파일을 완전한 파일로 교체)
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        print(f"✅ [Finalize] Audio file for meeting {meeting_id} saved. Starting re-transcription...")
+        print(f"✅ [Finalize] Audio file for meeting {meeting_id} saved. (No re-transcription, preserving realtime STT results)")
         
-        # DB 업데이트 및 상태를 'processing'으로 변경 (재분석 중임을 표시)
+        # DB: 오디오 경로만 업데이트 (상태는 WebSocket final_cleanup_and_summary가 담당)
         meeting.audio_file_path = f"media/{filename}"
-        meeting.status = MeetingStatus.PROCESSING
         db.commit()
 
-        # [고도화 하이브리드] Whisper 엔진을 이용한 전체 오디오 정밀 재분석 시작
-        background_tasks.add_task(process_audio_file, meeting_id, str(file_path))
-        
-        return {"status": "success", "message": "Recording finalized, re-transcription started"}
+        # Duration 헤더만 복구 (전사 재분석 없음)
+        from app.api.endpoints.recording import _repair_audio_duration_sync
+        background_tasks.add_task(_repair_audio_duration_sync, str(file_path))
+
+        return {"status": "success", "message": "Recording finalized, audio file updated (realtime transcripts preserved)"}
     except Exception as e:
         print(f"❌ [Finalize] Failed: {e}")
         db.rollback()

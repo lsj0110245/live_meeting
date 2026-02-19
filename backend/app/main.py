@@ -96,24 +96,72 @@ mimetypes.add_type('audio/mpeg', '.mp3')
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 @app.get("/media/{file_path:path}")
-async def get_media(file_path: str):
+async def get_media(file_path: str, request: Request):
     """
     미디어 파일 서빙 엔드포인트
-    - FileResponse를 사용하여 브라우저의 Range 요청(Seeking) 및 캐싱 자동 처리
+    - Range Request(HTTP 206) 지원으로 오디오 스크러버(seek) 정상 동작
+    - 파일이 변경된 경우에만 재전송 (ETag 기반 no-cache 전략)
     """
+    from fastapi.responses import Response
     abs_path = settings.MEDIA_ROOT / file_path
     if not abs_path.exists() or not abs_path.is_file():
-        raise HTTPException(status_code=403, detail=f"Permission denied or file not found: {file_path}") # 403인 경우도 고려 (권한)
-    
-    # MIME 타입 유추 (이미 위에서 .webm 등 보강됨)
+        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+
+    file_size = abs_path.stat().st_size
+    mtime = abs_path.stat().st_mtime
+    etag = f'"{file_size}-{int(mtime)}"'
+
+    # ETag 검증 (파일 변경 없으면 304 반환)
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match == etag:
+        return Response(status_code=304)
+
+    # Range Request 처리 (오디오 스크러버 seek 지원)
+    range_header = request.headers.get("range")
+
+    import mimetypes as mt
+    mime_type, _ = mt.guess_type(str(abs_path))
+    if not mime_type:
+        mime_type = "application/octet-stream"
+
+    if range_header:
+        # "bytes=start-end" 파싱
+        try:
+            range_val = range_header.replace("bytes=", "")
+            parts = range_val.split("-")
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if parts[1] else file_size - 1
+            end = min(end, file_size - 1)
+            chunk_size = end - start + 1
+
+            with open(abs_path, "rb") as f:
+                f.seek(start)
+                data = f.read(chunk_size)
+
+            return Response(
+                content=data,
+                status_code=206,
+                media_type=mime_type,
+                headers={
+                    "Content-Range": f"bytes {start}-{end}/{file_size}",
+                    "Accept-Ranges": "bytes",
+                    "Content-Length": str(chunk_size),
+                    "ETag": etag,
+                    "Cache-Control": "no-cache",
+                }
+            )
+        except Exception:
+            pass  # 파싱 실패 시 전체 파일 반환
+
+    # 일반 요청 (전체 파일)
     return FileResponse(
         abs_path,
         filename=os.path.basename(abs_path),
         content_disposition_type="inline",
         headers={
-            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-            "Pragma": "no-cache",
-            "Expires": "0"
+            "Accept-Ranges": "bytes",
+            "ETag": etag,
+            "Cache-Control": "no-cache",
         }
     )
 
