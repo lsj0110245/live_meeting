@@ -16,6 +16,7 @@ let isPaused = false; // [New] 일시정지 상태
 let recordingSeconds = 0; // 녹음 시간 (초)
 let recordingTimer = null; // 타이머 객체
 let isResuming = false; // [New] 이어서 녹음하기 모드 여부
+let isAbnormalDisconnect = false; // [New] 비정상 종료 (서버 연결 끊김 등) 상태
 
 // DOM 요소
 const statusDot = document.querySelector('.status-dot');
@@ -66,7 +67,9 @@ function connectWebSocket() {
         // [Fix] 연결 끊김 시 처리
         if (isRecording) {
             if (!isIntentionalStop) {
-                alert("서버 연결이 끊겨 녹음이 중단되었습니다.");
+                // 비정상 종료 상황
+                isAbnormalDisconnect = true;
+                alert("서버 연결이 끊겨 녹음이 중단되었습니다.\n'이어서 녹음하기'를 눌러 재개할 수 있습니다.");
             }
             stopRecording();
         }
@@ -142,6 +145,25 @@ let meetingMetadata = null;
 
 function startRecording() {
     isIntentionalStop = false; // [Fix] 초기화
+
+    // [New] 만약 비정상 종료 후 '이어서 녹음하기' 상태라면
+    if (isAbnormalDisconnect && currentMeetingId) {
+        if (confirm('이전 회의에 이어서 녹음하시겠습니까?')) {
+            isResuming = true;
+            // 메타데이터(meetingMetadata)에 meeting_id 주입하여 서버에 알림
+            if (!meetingMetadata) meetingMetadata = {};
+            meetingMetadata.meeting_id = currentMeetingId;
+            startRecordingImmediate();
+            return;
+        } else {
+            // '아니오' 선택 시: 새로운 회의 시작 (상태 초기화)
+            isAbnormalDisconnect = false;
+            isResuming = false;
+            currentMeetingId = null;
+            meetingMetadata = null;
+        }
+    }
+
     // 메타데이터 입력 없이 바로 녹음 시작 (기본값 사용)
     startRecordingImmediate();
 }
@@ -520,6 +542,25 @@ function stopRecording() {
     if (isIntentionalStop) {
         showEditConfirmationModal();
         isIntentionalStop = false; // Reset
+    } else if (isAbnormalDisconnect) {
+        // 비정상 종료 시: 버튼을 '이어서 녹음하기'로 변경
+        updateResumeButtonState(true);
+    }
+}
+
+/**
+ * [New] 버튼 상태 변경 (녹음 시작 <-> 이어서 녹음하기)
+ */
+function updateResumeButtonState(isResumeMode) {
+    if (isResumeMode) {
+        btnStart.innerHTML = '<i class="fa-solid fa-link"></i> 이어서 녹음하기';
+        btnStart.classList.add('btn-resume-mode'); // 스타일링용 클래스 추가 (필요 시 CSS)
+        btnStart.style.backgroundColor = '#ff9800'; // 주황색 등 구별되는 색상
+        updateStatus('ready', '연결 끊김 (이어서 녹음 가능)');
+    } else {
+        btnStart.innerHTML = '<i class="fa-solid fa-microphone"></i> 녹음 시작';
+        btnStart.classList.remove('btn-resume-mode');
+        btnStart.style.backgroundColor = ''; // 원래 색상 복귀
     }
 }
 

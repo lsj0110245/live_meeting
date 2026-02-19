@@ -67,11 +67,13 @@ class FasterWhisperSTTService:
                     temperature=0,
                     repetition_penalty=1.2,
                     condition_on_previous_text=True,
-                    initial_prompt="금융, IT, 비즈니스 전문 회의 녹음입니다. 날짜(2026-02-11), 시간(오후 3:45), 전화번호(010-1234-5678), 계좌번호(123-45-6789) 등 숫자와 기호를 정확히 표기하세요. 가나다라마바사, 아자차카타파하와 같은 음성 테스트 패턴과 Accuracy, Latency 등 IT 전문 용어 영문 표기를 유지하세요.",
+                    initial_prompt="회의 내용을 기록합니다.",
                     vad_filter=True,
                     vad_parameters=dict(
                         min_silence_duration_ms=1000, 
-                        speech_pad_ms=400
+                        speech_pad_ms=400,
+                        threshold=0.5, # VAD 임계값 추가
+                        min_speech_duration_ms=250 # 너무 짧은 소리는 무시
                     )
                 )
                 
@@ -147,7 +149,7 @@ class FasterWhisperSTTService:
                     repetition_penalty=1.3,
                     no_repeat_ngram_size=3,
                     condition_on_previous_text=False,
-                    initial_prompt="회의 녹음입니다. 자연스러운 한국어 문장으로 기록해 주세요.",
+                    initial_prompt="회의 내용을 기록합니다.",
                     vad_filter=True,
                     vad_parameters=dict(
                         min_silence_duration_ms=800, 
@@ -377,11 +379,13 @@ class FasterWhisperSTTService:
                             temperature=0,
                             repetition_penalty=1.2,
                             condition_on_previous_text=True, # 청크 간 문맥 유지
-                            initial_prompt="회의 녹음입니다. 전문 용어 표기를 정확히 하고 자연스러운 문장으로 기록하세요.",
+                            initial_prompt="회의 내용을 기록합니다.",
                             vad_filter=True,
                             vad_parameters=dict(
                                 min_silence_duration_ms=1000,
-                                speech_pad_ms=400
+                                speech_pad_ms=400,
+                                threshold=0.5,
+                                min_speech_duration_ms=250
                             )
                         )
                         
