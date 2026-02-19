@@ -147,7 +147,7 @@ class FasterWhisperSTTService:
                     repetition_penalty=1.3,
                     no_repeat_ngram_size=3,
                     condition_on_previous_text=False,
-                    initial_prompt="가나다라마바사, 아자차카타파하, 010-1234-5678, 123-456-78901, 2026년 2월 11일, Accuracy, Latency, Robustness, API, Docker, FastAPI, JSON, Python.",
+                    initial_prompt="회의 녹음입니다. 자연스러운 한국어 문장으로 기록해 주세요.",
                     vad_filter=True,
                     vad_parameters=dict(
                         min_silence_duration_ms=800, 
@@ -171,10 +171,16 @@ class FasterWhisperSTTService:
                 if segment.no_speech_prob > 0.8: # 확실한 침묵인 경우
                     continue
 
-                if re.search(r"자막|박진희|vostfr|Subtitles|Thank you|시청해 주셔서|무단 전재|배포 금지|감사합니다", text, re.I):
+                # [강화된 필터링] 테스트 패턴, 반복적인 숫자, 환각 텍스트 제거
+                # 예: "아자차카타파하", "010-1234-5678" 같은 무의미한 예시 문구
+                if re.search(r"자막|박진희|vostfr|Subtitles|Thank you|시청해 주셔서|무단 전재|배포 금지|감사합니다|가나다라|아자차카|마바사|010-1234-5678|123-456-7890", text, re.I):
                     # 환각 패턴이 포함된 경우 스킵
                     continue
                 
+                # [추가 필터링] 의미 없는 반복 문자열 (예: ".......")
+                if re.match(r'^[\.\,\?\!\s]*$', text):
+                    continue
+
                 if len(text) <= 1:
                     continue
                     
@@ -256,21 +262,17 @@ class FasterWhisperSTTService:
             samples = np.array(original_audio.get_array_of_samples())
             
             # 3. [Denoise] 잡음 제거
-            print("  Denoising audio...")
             if quality == "high": # 파일 전사용 (꼼꼼하게)
+                print("  Denoising audio (High Quality)...")
                 reduced_noise_audio = nr.reduce_noise(
                     y=samples, sr=16000, 
                     stationary=True, 
                     prop_decrease=0.90, # 90% 제거
                     n_std_thresh_stationary=1.5
                 )
-            else: # 실시간용 (적당히)
-                reduced_noise_audio = nr.reduce_noise(
-                    y=samples, sr=16000, 
-                    stationary=True, 
-                    prop_decrease=0.75, # 75% 제거
-                    n_std_thresh_stationary=1.5
-                )
+            else: # 실시간용 (속도 우선 - Denoise 생략)
+                print("  Skipping Denoise for Realtime (Speed Priority)...")
+                reduced_noise_audio = samples # 원본 그대로 사용
 
             # 4. Numpy -> AudioSegment 복원
             denoised_segment = AudioSegment(
