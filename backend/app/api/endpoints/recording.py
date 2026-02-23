@@ -4,6 +4,7 @@
 
 import io
 import json
+from pathlib import Path
 from typing import List, Dict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, status
 from sqlalchemy.orm import Session
@@ -482,6 +483,8 @@ async def websocket_endpoint(
                         # 메타데이터 저장 및 Meeting 생성 (또는 기존 회의 불러오기)
                         from app.models.meeting import Meeting
                         from datetime import datetime
+                        
+                        print(f"[WebSocket] Metadata received for client {client_id}: {message.get('data', {})}")
                         
                         db_meta = SessionLocal()
                         try: 
