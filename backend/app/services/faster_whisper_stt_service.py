@@ -17,18 +17,18 @@ from faster_whisper import WhisperModel
 class FasterWhisperSTTService:
     """
     Faster-Whisper 기반 음성 인식 서비스
-    
+
     - 녹음 파일 처리: 30초 청크, 정확도 우선
     - 실시간 STT: 5초 청크, 속도 우선
     """
-    
+
     def __init__(self):
         from app.core.config import settings
         self.model_size = settings.STT_MODEL_SIZE
         self.model: Optional[WhisperModel] = None
         self.device = settings.STT_DEVICE
         self.compute_type = settings.STT_COMPUTE_TYPE
-        
+
     def _initialize_model(self):
         """모델 초기화 (필요 시에만 로드)"""
         if self.model is None:
@@ -47,7 +47,7 @@ class FasterWhisperSTTService:
                         compute_type=self.compute_type
                     )
                     print("Faster-Whisper 모델 로드 완료")
-    
+
     async def transcribe_file(self, file_path: str, language: str = "ko", progress_callback=None) -> list:
         """
         녹음 파일 전사 (정확도 우선)
@@ -57,7 +57,7 @@ class FasterWhisperSTTService:
             # Blocking 방지를 위해 전체 전사 로직을 별도 스레드에서 실행
             # 중요: segments는 제너레이터이므로 순회(iteration)도 스레드 안에서 해야 함
             import asyncio
-            
+
             def _transcribe_in_thread():
                 """스레드 내부에서 실행될 전사 함수"""
                 # [수정] 모델 초기화도 스레드 내부에서 수행
@@ -74,17 +74,17 @@ class FasterWhisperSTTService:
                     initial_prompt="회의 녹음입니다. 자연스러운 한국어 문장으로 기록해 주세요.",
                     vad_filter=True,
                     vad_parameters=dict(
-                        min_silence_duration_ms=1000, 
+                        min_silence_duration_ms=1000,
                         speech_pad_ms=400,
                         threshold=0.5, # VAD 임계값 추가
                         min_speech_duration_ms=250 # 너무 짧은 소리는 무시
                     )
                 )
-                
+
                 # 제너레이터를 리스트로 변환 (이 작업도 스레드 안에서 수행)
                 result_segments = []
                 total_duration = info.duration
-                
+
                 for segment in segments:
                     result_segments.append({
                         "start": segment.start,
@@ -92,29 +92,29 @@ class FasterWhisperSTTService:
                         "text": segment.text.strip()
                     })
                     print(f"  - [{segment.start:.2f}s ~ {segment.end:.2f}s] {segment.text.strip()[:20]}...")
-                
+
                 return result_segments, total_duration
-            
+
             # 스레드에서 실행
             result_segments, total_duration = await asyncio.to_thread(_transcribe_in_thread)
-            
+
             print(f"오디오 길이: {total_duration:.2f}초")
             print(f"[파일 전사 완료] 세그먼트 개수: {len(result_segments)}")
-            
+
             # 진행률 콜백 처리 (이미 완료된 상태이므로 100%로 설정)
             if progress_callback:
                 progress_callback(100)
-            
+
             return result_segments
-            
+
         except Exception as e:
             print(f"Faster-Whisper 전사 오류: {str(e)}")
             raise e
-    
+
     async def transcribe_realtime(self, audio_bytes: bytes, language: str = "ko", skip_duration_ms: int = 0) -> str:
         """
         실시간 전사 (속도 우선)
-        
+
         Args:
             audio_bytes: 실시간 오디오 스트림 데이터
             language: 언어 코드
@@ -129,7 +129,7 @@ class FasterWhisperSTTService:
         import tempfile
         import os
         temp_path = None
-        
+
         try:
             # [품질 개선] 전처리
             print(f"[STT] Starting preprocessing for {len(audio_bytes)} bytes")
@@ -156,10 +156,10 @@ class FasterWhisperSTTService:
                     initial_prompt="회의 녹음입니다. 자연스러운 한국어 문장으로 기록해 주세요.",
                     vad_filter=True,
                     vad_parameters=dict(
-                        min_silence_duration_ms=800, 
-                        speech_pad_ms=400,          
-                        min_speech_duration_ms=300, 
-                        threshold=0.5               
+                        min_silence_duration_ms=800,
+                        speech_pad_ms=400,
+                        min_speech_duration_ms=300,
+                        threshold=0.5
                     ),
                     no_speech_threshold=0.6,
                     log_prob_threshold=-1.0
@@ -172,7 +172,7 @@ class FasterWhisperSTTService:
             for segment in segments:
                 text = segment.text.strip()
                 # print(f"Detected Segment: {text}, Prob: {segment.no_speech_prob:.4f}") # 디버그용
-                    
+
                 # [필터링] 환각 및 침묵 패턴 제거
                 if segment.no_speech_prob > 0.8: # 확실한 침묵인 경우
                     continue
@@ -182,30 +182,30 @@ class FasterWhisperSTTService:
                 if re.search(r"자막|박진희|vostfr|Subtitles|Thank you|시청해 주셔서|무단 전재|배포 금지|감사합니다|가나다라|아자차카|마바사|010-1234-5678|123-456-7890", text, re.I):
                     # 환각 패턴이 포함된 경우 스킵
                     continue
-                
+
                 # [추가 필터링] 의미 없는 반복 문자열 (예: ".......")
                 if re.match(r'^[\.\,\?\!\s]*$', text):
                     continue
 
                 if len(text) <= 1:
                     continue
-                    
+
                 transcript_text += text + " "
 
             if not segments:
                 print(f"Realtime STT: No segments detected for audio chunk (length: {len(audio_bytes)} bytes)")
             # if transcript_text.strip():
             #      print(f"Final Transcript: {transcript_text}")
-                 
+
             return transcript_text.strip()
- 
+
         except Exception as e:
             if "Invalid data found" in str(e):
                 # 잡음/무음 구간에서 발생하는 에러 무시
                 return ""
             print(f"Realtime STT Internal Error: {e}")
             raise e
-            
+
         finally:
             # 임시 파일 삭제
             if temp_path and os.path.exists(temp_path):
@@ -318,8 +318,8 @@ class FasterWhisperSTTService:
 
             # ── 3. [침묵 감지] ────────────────────────────────────────────
             # realtime(fast) 모드: Whisper vad_filter가 이미 침묵을 걸러주므로 여기서는 패스
-            # high 품질 모드(파일 전사): 완전 무음(-70dBFS) 수준만 조기 차단
-            SILENCE_THRESHOLD_DBFS = -70  # -70dBFS 이하는 거의 디지털 무음
+            # high 품질 모드(파일 전사): 완전 무음(-55dBFS) 수준만 조기 차단
+            SILENCE_THRESHOLD_DBFS = -55  # -55dBFS 이하는 거의 디지털 무음
             if quality == "high" and original_audio.dBFS < SILENCE_THRESHOLD_DBFS:
                 print(f"  Audio is completely silent ({original_audio.dBFS:.1f}dBFS). Returning silent WAV.")
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
@@ -387,7 +387,7 @@ class FasterWhisperSTTService:
                 # 파일 경로인 경우 원본 그대로 반환
                 print(f"  Fallback: Using original file path {audio_data}")
                 return str(audio_data)
-    
+
     async def transcribe_file_chunked(self, file_path: str, language: str = "ko", progress_callback=None) -> list:
         """
         녹음 파일 전사 (오버래핑 청킹 적용) - 긴 파일 처리용
@@ -395,7 +395,7 @@ class FasterWhisperSTTService:
         """
         print(f"[청킹 전사 시작] {file_path}")
         print(f"[청킹 전사 시작] {file_path}")
-        
+
         cleaned_path = None
         try:
             # [전처리] 파일 모드용 고품질 Denoise & Normalize 적용
@@ -403,7 +403,7 @@ class FasterWhisperSTTService:
             import asyncio
             print(f"[전처리 중] 잡음 제거 및 오디오 증폭...")
             cleaned_path = await asyncio.to_thread(self._preprocess_audio, file_path, quality="high")
-            
+
             # [수정] 전체 청킹 전사 로직을 별도 스레드로 격리하여 Blocking 방지
             def _transcribe_chunked_in_thread():
                 self._initialize_model()
@@ -411,7 +411,7 @@ class FasterWhisperSTTService:
                 from pydub import AudioSegment
                 import tempfile
                 import os
-                
+
                 # 오디오 파일 로드 (전처리된 파일 사용)
                 if cleaned_path:
                      audio = AudioSegment.from_file(cleaned_path)
@@ -420,26 +420,26 @@ class FasterWhisperSTTService:
                 total_duration_ms = len(audio)
                 total_duration_sec = total_duration_ms / 1000.0
                 print(f"오디오 길이: {total_duration_sec:.2f}초")
-                
+
                 # 청킹 설정 (문맥 유지를 위해 30초 단위로 상향)
                 CHUNK_LENGTH_MS = 30000  # 30초
                 OVERLAP_MS = 5000        # 5초 오버랩
                 STEP_MS = CHUNK_LENGTH_MS - OVERLAP_MS
-                
+
                 all_segments = []
                 chunk_count = 0
-                
+
                 # 청크별 처리
                 for start_ms in range(0, total_duration_ms, STEP_MS):
                     end_ms = min(start_ms + CHUNK_LENGTH_MS, total_duration_ms)
                     chunk = audio[start_ms:end_ms]
                     chunk_count += 1
-                    
+
                     # 임시 파일로 저장
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
                         temp_path = temp_file.name
                         chunk.export(temp_path, format="wav")
-                    
+
                     try:
                         # [최적화] 청킹 전사 정확도 극대화
                         segments, info = self.model.transcribe(
@@ -459,7 +459,7 @@ class FasterWhisperSTTService:
                                 min_speech_duration_ms=250
                             )
                         )
-                        
+
                         # 세그먼트 수집 (시간 오프셋 보정)
                         offset_sec = start_ms / 1000.0
                         for segment in segments:
@@ -469,46 +469,46 @@ class FasterWhisperSTTService:
                                 "text": segment.text.strip()
                             }
                             all_segments.append(adjusted_segment)
-                            
+
                     finally:
                         # 임시 파일 삭제
                         if os.path.exists(temp_path):
                             os.remove(temp_path)
-                    
+
                     # 진행률 업데이트 (주의: 스레드 내부에서 호출되므로 thread-safe해야 함. 보통 간단한 print/callback은 OK)
                     if progress_callback:
                         percent = int((end_ms / total_duration_ms) * 100)
                         progress_callback(percent)
-                    
+
                     print(f"  청크 {chunk_count} 처리 완료 ({start_ms/1000:.1f}s ~ {end_ms/1000:.1f}s)")
-                
+
                 # 중복 제거 (오버랩 구간)
                 result_segments = self._merge_overlapping_segments(all_segments)
                 return result_segments
-            
+
             # 메인 로직 스레드에서 실행
             result_segments = await asyncio.to_thread(_transcribe_chunked_in_thread)
-            
+
             print(f"청킹 전사 완료: 총 {len(result_segments)}개 세그먼트")
             return result_segments
-            
+
         except Exception as e:
             print(f"청킹 전사 오류: {str(e)}")
             raise e
-    
+
     def _merge_overlapping_segments(self, segments: list) -> list:
         """
         오버랩 구간의 중복 세그먼트 병합
         """
         if not segments:
             return []
-        
+
         # 시작 시간 기준 정렬
         sorted_segments = sorted(segments, key=lambda x: x["start"])
-        
+
         merged = []
         current = sorted_segments[0].copy()
-        
+
         for next_seg in sorted_segments[1:]:
             # 오버랩 체크 (현재 세그먼트 끝 시간 > 다음 세그먼트 시작 시간)
             if current["end"] > next_seg["start"]:
@@ -520,10 +520,10 @@ class FasterWhisperSTTService:
                 # 겹치지 않음: 현재 세그먼트 저장하고 다음으로 이동
                 merged.append(current)
                 current = next_seg.copy()
-        
+
         # 마지막 세그먼트 추가
         merged.append(current)
-        
+
         return merged
 
     def cleanup(self):
@@ -531,7 +531,7 @@ class FasterWhisperSTTService:
         if self.model is not None:
             del self.model
             self.model = None
-            
+
             # CUDA 캐시 정리
             try:
                 import torch
