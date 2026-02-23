@@ -51,9 +51,6 @@ class Settings(BaseSettings):
     STT_DEVICE: str = "cuda"
     STT_COMPUTE_TYPE: str = "float16"
 
-    # LLM 설정 (Ollama)
-    LLM_MODEL: str = "exaone3.5:7.8b"  # Ollama 모델명 (EXAONE 3.5 사용)
-    
     # 스토리지 설정
     STORAGE_TYPE: str = "local"  # or "s3"
     S3_BUCKET_NAME: str | None = None

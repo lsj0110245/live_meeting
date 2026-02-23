@@ -388,13 +388,18 @@ async def websocket_endpoint(
             
             print(f"[Background Task] Starting final summary for meeting {mid}...")
             try:
-                # [Fix] 오디오 파일 헤더(Duration) 갱신 (FFmpeg)
-                # 이어서 녹음 세션은 클라이언트의 concat-resume 업로드가 처리하므로 여기서는 skip
-                if s_obj.audio_path and not s_obj.is_resume_session:
-                    print(f"[Background Task] Repairing audio duration for {s_obj.audio_path}...")
-                    await asyncio.to_thread(_repair_audio_duration_sync, s_obj.audio_path)
-                elif s_obj.is_resume_session:
-                    print(f"[Background Task] Resume session: audio repair deferred to concat-resume endpoint.")
+                # [Race Condition Fix] 오디오 파일 헤더 복구(_repair_audio_duration_sync)는
+                # 여기서 실행하지 않습니다.
+                #
+                # 일반 세션: 프론트엔드가 POST /upload/recording/{id}/finalize 를 통해
+                #            완성된 .webm 파일을 업로드하고 repair를 수행합니다.
+                #            여기서 동시에 실행하면 파일 쓰기와 충돌(race condition) 발생.
+                #
+                # 이어서 녹음: POST /upload/recording/{id}/concat-resume 가 처리합니다.
+                if s_obj.is_resume_session:
+                    print(f"[Background Task] Resume session: audio repair deferred to /concat-resume endpoint.")
+                else:
+                    print(f"[Background Task] Normal session: audio repair deferred to /finalize endpoint.")
 
                 await asyncio.to_thread(_update_meeting_duration_sync, mid, int(duration))
                 from app.services.meeting_tasks import process_meeting_summary

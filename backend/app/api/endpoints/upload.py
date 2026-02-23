@@ -2,6 +2,7 @@ import shutil
 import os
 import uuid
 import hashlib
+from pathlib import Path
 from typing import Any
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Form
 from sqlalchemy.orm import Session
@@ -10,7 +11,6 @@ from app.db.session import get_db
 from app.core.config import settings
 from app.models.user import User
 from app.models.meeting import Meeting
-from app.models.transcript import Transcript
 from app.models.transcript import Transcript
 from app.services.stt_service import stt_service
 from app.services.llm_service import llm_service

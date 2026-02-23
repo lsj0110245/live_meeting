@@ -211,9 +211,64 @@ class FasterWhisperSTTService:
             if temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)
 
+    def _bytes_to_wav_via_ffmpeg(self, audio_bytes: bytes, skip_duration_ms: int = 0) -> str | None:
+        """
+        ffmpeg stdin pipe를 통해 bytes -> WAV 변환 (포맷 자동 감지).
+        WebM 스트리밍 청크처럼 헤더가 불완전해도 최대한 처리.
+        Returns: 성공 시 WAV 임시 파일 경로, 실패 시 None
+        """
+        import tempfile
+        import subprocess
+        import os
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as out_f:
+            out_path = out_f.name
+
+        try:
+            cmd = [
+                "ffmpeg",
+                "-y",                        # 덮어쓰기 허용
+                "-loglevel", "warning",      # 경고 이상만 출력
+                "-f", "webm",                # 입력 포맷 힌트 (EBML 헤더 없어도 관대하게 처리)
+                "-i", "pipe:0",              # stdin에서 읽기
+                "-ar", "16000",              # 16kHz 리샘플
+                "-ac", "1",                  # 모노
+                "-f", "wav",                 # 출력 포맷
+                "-acodec", "pcm_s16le",      # PCM 16-bit LE
+            ]
+
+            # skip_duration_ms가 있으면 시작부터 해당 시간 제거
+            if skip_duration_ms > 0:
+                skip_sec = skip_duration_ms / 1000.0
+                cmd += ["-ss", str(skip_sec)]
+
+            cmd.append(out_path)
+
+            result = subprocess.run(
+                cmd,
+                input=audio_bytes,
+                capture_output=True,
+                timeout=15
+            )
+
+            if result.returncode == 0 and os.path.exists(out_path) and os.path.getsize(out_path) > 44:
+                return out_path
+            else:
+                stderr_msg = result.stderr.decode("utf-8", errors="replace")
+                print(f"  [ffmpeg pipe] Failed (code={result.returncode}): {stderr_msg[:200]}")
+                if os.path.exists(out_path):
+                    os.remove(out_path)
+                return None
+
+        except Exception as e:
+            print(f"  [ffmpeg pipe] Exception: {e}")
+            if os.path.exists(out_path):
+                os.remove(out_path)
+            return None
+
     def _preprocess_audio(self, audio_data: bytes | str, quality: str = "fast", skip_duration_ms: int = 0) -> str:
         """
-        오디오 전처리: 잡음 제거(Denoise) 및 증폭(Normalize)
+        오디오 전처리: WAV 변환 + 잡음 제거(Denoise) + 증폭(Normalize)
         - audio_data: bytes(실시간) 또는 str(파일 경로)
         - quality: "fast"(실시간용) 또는 "high"(파일전사용)
         - skip_duration_ms: 오디오 시작 부분에서 스킵할 시간 (실시간 헤더 중복 방지)
@@ -228,98 +283,110 @@ class FasterWhisperSTTService:
 
             print(f"Preprocessing start... Quality: {quality}")
 
-            # 1. 입력 데이터 로드 -> AudioSegment
-            if isinstance(audio_data, str): # 파일 경로인 경우
+            # ── 1. 입력 데이터 로드 ──────────────────────────────────────────
+            if isinstance(audio_data, str):
+                # 파일 경로인 경우: pydub로 직접 로드
                 print(f"  Loading audio from file: {audio_data}")
                 original_audio = AudioSegment.from_file(audio_data)
-                raw_path = None
-            else: # bytes인 경우 (실시간)
-                print(f"  Loading audio from bytes (length: {len(audio_data)} bytes)")
-                # WebM 등 포맷 헤더 문제 가능성 -> raw 저장 후 pydub 로드 시도
-                with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
-                    f.write(audio_data)
-                    raw_path = f.name
-                
-                # 매우 중요: WebM 스트림은 지속 시간이 없거나 헤더가 꼬일 수 있음.
-                # format="webm" 명시 또는 ffmpeg 프로브 필요할 수 있음.
-                original_audio = AudioSegment.from_file(raw_path)
+
+            else:
+                # bytes인 경우 (실시간 WebM 스트림):
+                # [핵심 수정] pydub(파일 경유)가 아닌 ffmpeg stdin pipe로 직접 변환
+                # → 불완전한 EBML 헤더를 가진 WebM 청크도 안정적으로 처리
+                print(f"  Loading audio from bytes via ffmpeg pipe (length: {len(audio_data)} bytes)")
+                wav_path = self._bytes_to_wav_via_ffmpeg(audio_bytes=audio_data, skip_duration_ms=skip_duration_ms)
+
+                if wav_path is None:
+                    # ffmpeg도 실패한 경우: 무음 500ms 반환 (Whisper가 조용히 무시)
+                    print("  [Fallback] ffmpeg pipe failed → returning silent WAV")
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as sf:
+                        silent = AudioSegment.silent(duration=500, frame_rate=16000)
+                        silent.export(sf.name, format="wav")
+                        return sf.name
+
+                # ffmpeg가 이미 skip_duration_ms를 처리했으므로 이후 단계에서는 0으로 설정
+                skip_duration_ms = 0
+                original_audio = AudioSegment.from_wav(wav_path)
+                os.remove(wav_path)  # 임시 파일 즉시 정리
 
             print(f"  Audio Loaded. Duration: {len(original_audio)}ms, Loudness: {original_audio.dBFS:.2f}dBFS")
 
-            # [헤더 중복 방지] skip_duration_ms 만큼 잘라내기
+            # ── 2. [헤더 중복 방지] skip_duration_ms 만큼 잘라내기 ─────────
             if skip_duration_ms > 0 and len(original_audio) > skip_duration_ms:
                 print(f"  Skipping initial {skip_duration_ms}ms of audio (header redundancy).")
                 original_audio = original_audio[skip_duration_ms:]
 
-            # [침묵 감지] 만약 오디오가 너무 조용하면 전처리를 건너뛰고 빈 파일 반환 시도
-            # -45dBFS 이하는 거의 무음이거나 매우 작은 잡음
-            if original_audio.dBFS < -45:
-                print("  Audio is too quiet. Skipping heavy processing to avoid hallucination.")
-                # 빈 WAV 파일 생성해서 반환 (Whisper가 무시하도록)
+            # ── 3. [침묵 감지] ────────────────────────────────────────────
+            # realtime(fast) 모드: Whisper vad_filter가 이미 침묵을 걸러주므로 여기서는 패스
+            # high 품질 모드(파일 전사): 완전 무음(-70dBFS) 수준만 조기 차단
+            SILENCE_THRESHOLD_DBFS = -70  # -70dBFS 이하는 거의 디지털 무음
+            if quality == "high" and original_audio.dBFS < SILENCE_THRESHOLD_DBFS:
+                print(f"  Audio is completely silent ({original_audio.dBFS:.1f}dBFS). Returning silent WAV.")
                 with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                     temp_path = f.name
-                    # 500ms 무음 생성
-                    silent_audio = AudioSegment.silent(duration=500, frame_rate=16000)
-                    silent_audio.export(temp_path, format="wav")
+                    AudioSegment.silent(duration=500, frame_rate=16000).export(temp_path, format="wav")
                 return temp_path
+            elif quality == "fast":
+                # realtime 모드: 음량 정보만 로그로 남기고 Whisper VAD에 위임
+                print(f"  Audio loudness: {original_audio.dBFS:.1f}dBFS (Whisper VAD will handle silence)")
 
-            # 2. AudioSegment -> Numpy Array 변환
+            # ── 4. AudioSegment → Numpy Array ────────────────────────────────
             original_audio = original_audio.set_frame_rate(16000).set_channels(1)
             samples = np.array(original_audio.get_array_of_samples())
-            
-            # 3. [Denoise] 잡음 제거
-            if quality == "high": # 파일 전사용 (꼼꼼하게)
+
+            # ── 5. [Denoise] 잡음 제거 ───────────────────────────────────────
+            if quality == "high":
                 print("  Denoising audio (High Quality)...")
                 reduced_noise_audio = nr.reduce_noise(
-                    y=samples, sr=16000, 
-                    stationary=True, 
-                    prop_decrease=0.90, # 90% 제거
+                    y=samples, sr=16000,
+                    stationary=True,
+                    prop_decrease=0.90,
                     n_std_thresh_stationary=1.5
                 )
-            else: # 실시간용 (속도 우선 - Denoise 생략)
+            else:
                 print("  Skipping Denoise for Realtime (Speed Priority)...")
-                reduced_noise_audio = samples # 원본 그대로 사용
+                reduced_noise_audio = samples
 
-            # 4. Numpy -> AudioSegment 복원
+            # ── 6. Numpy → AudioSegment 복원 ─────────────────────────────────
             denoised_segment = AudioSegment(
-                reduced_noise_audio.tobytes(), 
+                reduced_noise_audio.tobytes(),
                 frame_rate=16000,
-                sample_width=original_audio.sample_width, 
+                sample_width=original_audio.sample_width,
                 channels=1
             )
 
-            # 5. [Normalize] 증폭 및 평준화
+            # ── 7. [Normalize] 증폭 및 평준화 ────────────────────────────────
             print("  Normalizing audio...")
             denoised_segment = effects.normalize(denoised_segment)
-            denoised_segment = denoised_segment + 5 # +5dB 추가 확보
+            denoised_segment = denoised_segment + 5  # +5dB 추가 확보
 
-            # 결과 저장
+            # ── 8. 결과 WAV 저장 ─────────────────────────────────────────────
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 temp_path = f.name
                 denoised_segment.export(temp_path, format="wav")
-            
-            print(f"Preprocessing Done. Saved to {temp_path}")
 
-            # 임시 파일 정리
-            if raw_path and os.path.exists(raw_path):
-                os.remove(raw_path)
-                
+            print(f"Preprocessing Done. Saved to {temp_path}")
             return temp_path
 
         except Exception as e:
             print(f"!! Preprocessing Failed: {e}")
-            # 실패 시 안전하게 원본 유지 (fallback)
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-                if isinstance(audio_data, bytes):
-                    f.write(audio_data)
-                    print(f"  Fallback: Saved raw bytes to {f.name}")
-                    return f.name
-                else: 
-                    # 파일인 경우 그냥 원본 경로 복사하거나 그대로 사용해야 하는데
-                    # 여기선 안전하게 pydub로 읽어서 wav 저장
-                    # AudioSegment.from_file(audio_data).export(f.name, format="wav")
-                    print(f"  Fallback: Using original file path {audio_data}")
-                    return str(audio_data)
+            # [Fallback] ffmpeg pipe로 최소한의 WAV 변환만 시도
+            if isinstance(audio_data, bytes):
+                wav_path = self._bytes_to_wav_via_ffmpeg(audio_bytes=audio_data, skip_duration_ms=0)
+                if wav_path:
+                    print(f"  Fallback: ffmpeg pipe WAV saved to {wav_path}")
+                    return wav_path
+                # ffmpeg도 실패 → 무음 반환
+                import tempfile as _tf
+                from pydub import AudioSegment as _AS
+                with _tf.NamedTemporaryFile(suffix=".wav", delete=False) as sf:
+                    _AS.silent(duration=500, frame_rate=16000).export(sf.name, format="wav")
+                    print(f"  Fallback: returning silent WAV {sf.name}")
+                    return sf.name
+            else:
+                # 파일 경로인 경우 원본 그대로 반환
+                print(f"  Fallback: Using original file path {audio_data}")
+                return str(audio_data)
     
     async def transcribe_file_chunked(self, file_path: str, language: str = "ko", progress_callback=None) -> list:
         """
