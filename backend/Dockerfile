@@ -25,6 +25,11 @@ RUN mkdir -p /app/media/recordings/audio \
     /app/exports/csv \
     /app/exports/xlsx
 
+# STT 모델 다운로드 (Build 과정에서 캐싱)
+ARG HUGGING_FACE_TOKEN
+ENV HUGGING_FACE_TOKEN=$HUGGING_FACE_TOKEN
+RUN python download_model.py
+
 # Expose port
 EXPOSE 8000
 

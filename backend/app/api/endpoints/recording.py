@@ -329,8 +329,7 @@ async def websocket_endpoint(
         
         # [Pre-warm] 연결 즉시 STT 모델 미리 로드 (백그라운드)
         # 첫 5초 데이터가 수집되는 동안 모델을 미리 GPU에 올려 지연을 최소화함
-        asyncio.create_task(asyncio.to_thread(stt_service.initialize_model))
-        
+        asyncio.create_task(asyncio.to_thread(stt_service.initialize_model))        
     except Exception as e:
         print(f"[WebSocket] Connection failed: {e}")
         return

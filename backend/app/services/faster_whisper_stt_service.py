@@ -37,6 +37,10 @@ class FasterWhisperSTTService:
             with _model_lock:
                 if self.model is None: # 이중 체크
                     print(f"Faster-Whisper 모델 초기화 중: {self.model_size}")
+                    hf_token = os.environ.get("HUGGING_FACE_TOKEN")
+                    if hf_token and not os.environ.get("HF_TOKEN"):
+                        os.environ["HF_TOKEN"] = hf_token
+                        print("HF_TOKEN 환경 변수가 설정되었습니다.")
                     self.model = WhisperModel(
                         self.model_size,
                         device=self.device,

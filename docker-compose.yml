@@ -27,6 +27,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        HUGGING_FACE_TOKEN: ${HUGGING_FACE_TOKEN}
     container_name: lm_backend
     restart: always
     env_file:
