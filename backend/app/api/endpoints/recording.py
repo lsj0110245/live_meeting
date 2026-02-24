@@ -362,6 +362,29 @@ async def websocket_endpoint(
         # 2. 중간 요약 태스크
         async def background_summary_task(text, mid, cid):
             try:
+                import re as _re
+
+                # [검증] LLM에 보내기 전 텍스트 품질 검사
+                # 너무 짧으면 의미 있는 요약 불가 → 스킵
+                MIN_CHARS_FOR_SUMMARY = 50
+                if len(text.strip()) < MIN_CHARS_FOR_SUMMARY:
+                    print(f"[Summary Skip] 텍스트가 너무 짧음 ({len(text.strip())}자 < {MIN_CHARS_FOR_SUMMARY}자)")
+                    return
+
+                # 환각/쓰레기 패턴이 과반 이상이면 스킵 (LLM 환각 방지)
+                HALLUCINATION_PATTERNS = [
+                    "자연스러운 한국어 문장으로", "회의 녹음입니다",
+                    "마이크 테스트", "마이브 테스트",
+                    "가나다라", "아자차카", "마바사",
+                    "자막", "감사합니다", "시청해 주셔서",
+                ]
+                hallucination_count = sum(1 for p in HALLUCINATION_PATTERNS if p in text)
+                words = text.strip().split()
+                if hallucination_count >= 2 or (hallucination_count >= 1 and len(words) < 20):
+                    print(f"[Summary Skip] 환각 패턴 다수 감지 ({hallucination_count}개), 요약 건너뜀")
+                    return
+
+                print(f"[Summary] 중간 요약 시작 (텍스트 {len(text)}자)")
                 summary = await llm_service.generate_simple_summary(text)
                 if summary and summary.strip():
                     await manager.send_json(cid, {
@@ -374,6 +397,7 @@ async def websocket_endpoint(
                         new_is = IntermediateSummary(meeting_id=mid, content=summary)
                         db_context.add(new_is)
                         db_context.commit()
+                        print(f"[Summary] 중간 요약 저장 완료: {summary[:30]}...")
                     except Exception as e:
                         db_context.rollback()
                         print(f"Background intermediate summary DB save failed: {e}")
