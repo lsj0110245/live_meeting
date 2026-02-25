@@ -31,8 +31,9 @@ cp .env.example .env
 
 **주요 설정 항목 확인:**
 *   `HUGGING_FACE_TOKEN`: HuggingFace 모델 다운로드를 위해 필요합니다.
-*   `LANGSMITH_API_KEY`: LangChain 모니터링 키 (없으면 `LANGSMITH_TRACING_V2=false`로 변경).
+*   `LANGCHAIN_API_KEY`: LangChain 모니터링 키 (없으면 `LANGCHAIN_TRACING_V2=false`로 변경).
 *   `POSTGRES_PASSWORD` 및 `SECRET_KEY`: 보안을 위해 변경 권장.
+*   `OLLAMA_BASE_URL`: Docker 내부 통신용 (`http://llm:11434`).
 
 ## 4. Docker 실행
 
@@ -46,18 +47,20 @@ docker-compose up -d --build
 
 ## 5. 초기 모델 설정 (Ollama)
 
-컨테이너가 실행된 후, Ollama 컨테이너 내부에서 LLM 모델을 받아야 할 수 있습니다.
-(`backend/app/services/llm_service.py` 등에서 자동 pull 로직이 없다면 수동 실행 필요)
+컨테이너 실행 시 `scripts/ollama_entrypoint.sh`에 의해 설정된 `LLM_MODEL`을 자동으로 다운로드(pull)합니다.
+만약 수동으로 모델을 추가하거나 확인하고 싶다면 아래 명령어를 사용하세요.
 
 ```bash
+docker exec -it lm_llm ollama list
 docker exec -it lm_llm ollama pull exaone3.5:7.8b
 ```
 
 ## 6. 접속
 
 브라우저에서 다음 주소로 접속하여 확인합니다.
-*   **Frontend**: http://localhost:3000 (또는 설정된 포트)
-*   **Backend Docs**: http://localhost:8001/docs
+*   **Web Application (Frontend + Backend)**: http://localhost:8001
+*   **Backend API Docs**: http://localhost:8001/docs
+*   **Database**: localhost 포트 `15432`로 접속 가능
 
 ## 7. 문제 해결
 
