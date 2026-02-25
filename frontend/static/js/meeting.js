@@ -329,6 +329,7 @@ function showMetadataModal(format) {
     // 현재 데이터로 폼 채우기
     if (currentMeetingData) {
         document.getElementById('meeting-title-input').value = currentMeetingData.title || '';
+        document.getElementById('meeting-purpose-input').value = currentMeetingData.description || '';
         document.getElementById('meeting-type-input').value = currentMeetingData.meeting_type || '';
         document.getElementById('meeting-date-input').value = currentMeetingData.meeting_date ? currentMeetingData.meeting_date.substring(0, 16) : '';
         document.getElementById('meeting-attendees-input').value = currentMeetingData.attendees || '';
@@ -371,6 +372,7 @@ async function submitMetadataAndExport() {
 
     const updateData = {
         title: document.getElementById('meeting-title-input').value.trim(),
+        description: document.getElementById('meeting-purpose-input').value.trim(),
         meeting_type: document.getElementById('meeting-type-input').value.trim(),
         meeting_date: document.getElementById('meeting-date-input').value || null, // datetime-local format or null
         attendees: document.getElementById('meeting-attendees-input').value.trim(),
@@ -444,14 +446,23 @@ async function executeExport(format) {
 
         hideLoading();
 
+        // Content-Disposition 헤더에서 파일명 추출 시도
+        const disposition = response.headers.get('Content-Disposition');
+        let filename = "";
+        if (disposition && disposition.includes('filename*=UTF-8\'\'')) {
+            filename = decodeURIComponent(disposition.split('filename*=UTF-8\'\'')[1]);
+        } else if (disposition && disposition.includes('filename=')) {
+            filename = disposition.split('filename=')[1].replace(/["']/g, '');
+        } else {
+            const dateStr = new Date().toISOString().slice(0, 10);
+            filename = `meeting_export_${dateStr}.${format === 'xlsx' ? 'xlsx' : 'csv'}`;
+        }
+
         // 다운로드 링크 생성
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-
-        // 파일명 추출 (Content-Disposition 헤더가 있다면 베스트, 아니면 날짜 기반)
-        const dateStr = new Date().toISOString().slice(0, 10);
-        a.download = `meeting_export_${dateStr}.${format === 'excel' ? 'xlsx' : 'csv'}`;
+        a.download = filename;
 
         document.body.appendChild(a);
         a.click();
