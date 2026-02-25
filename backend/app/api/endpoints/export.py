@@ -65,10 +65,13 @@ def parse_ai_summary(summary_content: str) -> dict:
         # LLM이 내용 앞에 "📅 **요약**" 등을 반복해서 넣는 경우 이를 제거합니다.
         for key in result:
             if result[key]:
-                # 이모지 + **제목** + 줄바꿈/공백 패턴 제거
+                # 1. 이모지 + **제목** + 줄바꿈/공백 패턴 제거
                 result[key] = re.sub(r'^(?:📅|📌|✅|📝|💬)\s*\*\*.*?\*\*\s*\n*', '', result[key]).strip()
-                # 혹시 제목이 없는 **내용** 형태도 시작부분에 있으면 제거
+                # 2. 제목이 없는 **내용** 형태도 시작부분에 있으면 제거
                 result[key] = re.sub(r'^\*\*.*?\*\*\s*\n*', '', result[key]).strip()
+                # 3. 엑셀 수식 오류 방지: 대시(-) 불렛을 동그라미(●)로 변경 (사용자 요청)
+                # 라인 시작의 대시와 공백 조합을 ●로 교체
+                result[key] = re.sub(r'(?m)^[\s#-]*[-]\s*', '● ', result[key])
         
     except Exception as e:
         print(f"AI 요약 파싱 오류: {str(e)}")
